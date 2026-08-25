@@ -98,7 +98,7 @@ def load_flash_image(dut, words, base=0):
         poke_fmem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=800_000):
+async def wait_halted(dut, max_cycles=400_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -137,21 +137,21 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 4
-
-
-async def set_gpio(dut, data, clock, start):
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = (int(start) << 2) | (int(clock) << 1) | int(data)
-
-
 async def send_bit(dut, bit):
-    await set_gpio(dut, bit, 0, 1)
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-    await set_gpio(dut, bit, 1, 1)  # Clock pulse HIGH
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-    await set_gpio(dut, bit, 0, 1)  # Clock pulse LOW
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
+    # Setup data ahead of clock pulse
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
+    await ClockCycles(dut.clk, 2)
+
+    # Pulse serial clock
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = (1 << 2) | (1 << 1) | (bit & 1)
+    await ClockCycles(dut.clk, 2)
+
+    # Drop serial clock
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
+    await ClockCycles(dut.clk, 2)
 
 
 async def send_byte_gpio(dut, byte):
@@ -165,12 +165,14 @@ async def test_bootloader(dut):
     await start_clock(dut)
     await reset_dut(dut)
 
-    # Initialize GPIO lines cleanly
-    await set_gpio(dut, 0, 0, 0)
+    # Ensure start bit is inactive initially
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = 0
     await ClockCycles(dut.clk, 10)
 
-    # Trigger start handshake (start = 1)
-    await set_gpio(dut, 0, 0, 1)
+    # Assert start signal (ui_in[2] = 1)
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = 1 << 2
     await ClockCycles(dut.clk, 10)
 
     prog_words = [
@@ -183,13 +185,14 @@ async def test_bootloader(dut):
 
     prog = words_to_bytes(prog_words)
 
-    # Send payload length followed by byte data
+    # Send length byte followed by instructions
     await send_byte_gpio(dut, len(prog))
     for b in prog:
         await send_byte_gpio(dut, b)
 
-    # End transmission framing
-    await set_gpio(dut, 0, 0, 0)
+    # Clear inputs and complete transmission
+    await FallingEdge(dut.clk)
+    dut.ui_in.value = 0
 
     await wait_halted(dut)
 
