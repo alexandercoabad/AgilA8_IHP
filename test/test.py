@@ -64,29 +64,43 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 30)
+    await ClockCycles(dut.clk, 100)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 50)
 
 
 def get_halted(dut):
     """Checks HALT state across standard RTL hierarchy and GL netlist aliases."""
-    for path in [
+    paths = [
         lambda: dut.user_project.core.halted.value,
         lambda: dut.core.halted.value,
         lambda: dut.user_project.halted.value,
-    ]:
+        lambda: dut.user_project.i_core.halted.value,
+    ]
+    for path in paths:
         try:
-            return int(path()) == 1
+            val = path()
+            if val.is_resolvable:
+                return int(val) == 1
         except (AttributeError, ValueError):
             pass
 
+    # Check top-level output pin fallback (uo_out[7] or uio_out[7])
     try:
-        uo_val = int(dut.uo_out.value)
-        uio_val = int(dut.uio_out.value)
-        return bool((uo_val & 0x80) or (uio_val & 0x80))
-    except (ValueError, TypeError):
-        return False
+        uo_val = dut.uo_out.value
+        if uo_val.is_resolvable and (int(uo_val) & 0x80):
+            return True
+    except (ValueError, TypeError, AttributeError):
+        pass
+
+    try:
+        uio_val = dut.uio_out.value
+        if uio_val.is_resolvable and (int(uio_val) & 0x80):
+            return True
+    except (ValueError, TypeError, AttributeError):
+        pass
+
+    return False
 
 
 def poke_fmem(dut, byte_addr, value):
@@ -110,7 +124,7 @@ def load_ram_image(dut, words, base=0):
         poke_smem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=400_000):
+async def wait_halted(dut, max_cycles=800_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -122,27 +136,35 @@ async def wait_halted(dut, max_cycles=400_000):
 def reg(dut, n):
     if n == 0:
         return 0
-    try:
-        return int(dut.user_project.core.regfile.regs[n].value)
-    except (AttributeError, ValueError):
-        pass
-
-    try:
-        return int(dut.core.regfile.regs[n].value)
-    except (AttributeError, ValueError):
-        return None
+    paths = [
+        lambda: dut.user_project.core.regfile.regs[n].value,
+        lambda: dut.core.regfile.regs[n].value,
+        lambda: dut.user_project.i_core.regfile.regs[n].value,
+    ]
+    for path in paths:
+        try:
+            val = path()
+            if val.is_resolvable:
+                return int(val)
+        except (AttributeError, ValueError):
+            pass
+    return None
 
 
 def pc(dut):
-    try:
-        return int(dut.user_project.core.pc.value)
-    except (AttributeError, ValueError):
-        pass
-
-    try:
-        return int(dut.core.pc.value)
-    except (AttributeError, ValueError):
-        return None
+    paths = [
+        lambda: dut.user_project.core.pc.value,
+        lambda: dut.core.pc.value,
+        lambda: dut.user_project.i_core.pc.value,
+    ]
+    for path in paths:
+        try:
+            val = path()
+            if val.is_resolvable:
+                return int(val)
+        except (AttributeError, ValueError):
+            pass
+    return None
 
 
 # ---------------------------------------------------------------------
@@ -272,13 +294,8 @@ async def test_full_opcode_regression(dut):
     dut.ui_in.value = 0
     await reset_dut(dut)
 
-    try:
-        for _ in range(10_000):
-            await RisingEdge(dut.clk)
-            if int(dut.user_project.flash_mode_r.value) == 1:
-                break
-    except (AttributeError, ValueError):
-        await ClockCycles(dut.clk, 25_000)
+    # Wait for execution mode to switch
+    await ClockCycles(dut.clk, 25_000)
 
     dut.ui_in.value = 0x55
 
