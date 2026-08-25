@@ -85,7 +85,6 @@ def get_halted(dut):
         except (AttributeError, ValueError):
             pass
 
-    # Check top-level output pin fallback (uo_out[7] or uio_out[7])
     try:
         uo_val = dut.uo_out.value
         if uo_val.is_resolvable and (int(uo_val) & 0x80):
@@ -294,8 +293,25 @@ async def test_full_opcode_regression(dut):
     dut.ui_in.value = 0
     await reset_dut(dut)
 
-    # Wait for execution mode to switch
-    await ClockCycles(dut.clk, 25_000)
+    # Monitor for entry into flash mode across hierarchy or fall back safely
+    in_flash_mode = False
+    for _ in range(30_000):
+        await RisingEdge(dut.clk)
+        paths = [
+            lambda: dut.user_project.flash_mode_r.value,
+            lambda: dut.user_project.core.flash_mode_r.value,
+            lambda: dut.core.flash_mode_r.value,
+        ]
+        for path in paths:
+            try:
+                val = path()
+                if val.is_resolvable and int(val) == 1:
+                    in_flash_mode = True
+                    break
+            except (AttributeError, ValueError):
+                pass
+        if in_flash_mode:
+            break
 
     dut.ui_in.value = 0x55
 
