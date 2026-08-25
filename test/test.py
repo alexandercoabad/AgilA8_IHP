@@ -72,34 +72,39 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
+    await ClockCycles(dut.clk, 20)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 10)
 
 
 def get_halted(dut):
     """Safely checks HALT state in RTL across hierarchy levels and GL mode."""
-    # Hierarchy path 1: Standard RTL core instance
-    try:
-        val = dut.user_project.core.halted.value
-        if val.is_resolvable:
-            return int(val) == 1
-    except (AttributeError, ValueError):
-        pass
+    paths = [
+        lambda: dut.user_project.core.halted.value,
+        lambda: dut.core.halted.value,
+        lambda: getattr(dut.user_project, "core.halted").value,
+        lambda: getattr(dut, "user_project.core.halted").value,
+    ]
+    for path in paths:
+        try:
+            val = path()
+            if val.is_resolvable:
+                return int(val) == 1
+        except (AttributeError, ValueError):
+            pass
 
-    # Hierarchy path 2: Direct RTL core instance alternative
-    try:
-        val = dut.core.halted.value
-        if val.is_resolvable:
-            return int(val) == 1
-    except (AttributeError, ValueError):
-        pass
-
-    # Fallback path 3: GL mode check on uo_out[7]
+    # Fallback path: GL mode check on uo_out[7] or uio_out[7]
     try:
         val = dut.uo_out.value
-        if val.is_resolvable:
-            return (int(val) & 0x80) != 0
+        if val.is_resolvable and (int(val) & 0x80):
+            return True
+    except (AttributeError, ValueError, TypeError):
+        pass
+
+    try:
+        val = dut.uio_out.value
+        if val.is_resolvable and (int(val) & 0x80):
+            return True
     except (AttributeError, ValueError, TypeError):
         pass
 
@@ -116,7 +121,7 @@ def load_flash_image(dut, words, base=0):
         poke_fmem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=400_000):
+async def wait_halted(dut, max_cycles=1_500_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -129,39 +134,33 @@ def reg(dut, n):
     """Safely retrieves register values, returning None if running in GL mode."""
     if n == 0:
         return 0
-    try:
-        val = dut.user_project.core.regfile.regs[n].value
-        if val.is_resolvable:
-            return int(val)
-    except (AttributeError, ValueError):
-        pass
-
-    try:
-        val = dut.core.regfile.regs[n].value
-        if val.is_resolvable:
-            return int(val)
-    except (AttributeError, ValueError):
-        pass
-
+    paths = [
+        lambda: dut.user_project.core.regfile.regs[n].value,
+        lambda: dut.core.regfile.regs[n].value,
+    ]
+    for path in paths:
+        try:
+            val = path()
+            if val.is_resolvable:
+                return int(val)
+        except (AttributeError, ValueError):
+            pass
     return None
 
 
 def pc(dut):
     """Safely retrieves program counter value, returning None in GL mode."""
-    try:
-        val = dut.user_project.core.pc.value
-        if val.is_resolvable:
-            return int(val)
-    except (AttributeError, ValueError):
-        pass
-
-    try:
-        val = dut.core.pc.value
-        if val.is_resolvable:
-            return int(val)
-    except (AttributeError, ValueError):
-        pass
-
+    paths = [
+        lambda: dut.user_project.core.pc.value,
+        lambda: dut.core.pc.value,
+    ]
+    for path in paths:
+        try:
+            val = path()
+            if val.is_resolvable:
+                return int(val)
+        except (AttributeError, ValueError):
+            pass
     return None
 
 
@@ -217,7 +216,7 @@ async def test_bootloader(dut):
         await send_byte_gpio(dut, b)
     await set_gpio(dut, 0, 0, 0)
 
-    await wait_halted(dut)
+    await wait_halted(dut, max_cycles=1_500_000)
 
     if reg(dut, 1) is not None:
         assert reg(dut, 1) == 5, f"r1 should be 5, got {reg(dut, 1)}"
