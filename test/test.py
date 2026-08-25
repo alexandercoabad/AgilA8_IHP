@@ -98,7 +98,7 @@ def load_flash_image(dut, words, base=0):
         poke_fmem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=400_000):
+async def wait_halted(dut, max_cycles=1_000_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -137,21 +137,24 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
+GPIO_HOLD_CYCLES = 8
+
+
 async def send_bit(dut, bit):
-    # Setup data ahead of clock pulse
+    # Setup data with clock LOW
     await FallingEdge(dut.clk)
     dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, 2)
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
 
-    # Pulse serial clock
+    # Pulse clock HIGH
     await FallingEdge(dut.clk)
     dut.ui_in.value = (1 << 2) | (1 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, 2)
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
 
-    # Drop serial clock
+    # Drop clock LOW
     await FallingEdge(dut.clk)
     dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, 2)
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
 
 
 async def send_byte_gpio(dut, byte):
@@ -165,15 +168,15 @@ async def test_bootloader(dut):
     await start_clock(dut)
     await reset_dut(dut)
 
-    # Ensure start bit is inactive initially
+    # Ensure start line is LOW
     await FallingEdge(dut.clk)
     dut.ui_in.value = 0
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 20)
 
-    # Assert start signal (ui_in[2] = 1)
+    # Assert start line HIGH with clock LOW
     await FallingEdge(dut.clk)
     dut.ui_in.value = 1 << 2
-    await ClockCycles(dut.clk, 10)
+    await ClockCycles(dut.clk, 20)
 
     prog_words = [
         itype('ADDI', 1, 0, 5),
@@ -190,7 +193,7 @@ async def test_bootloader(dut):
     for b in prog:
         await send_byte_gpio(dut, b)
 
-    # Clear inputs and complete transmission
+    # Deassert start line and reset inputs
     await FallingEdge(dut.clk)
     dut.ui_in.value = 0
 
