@@ -1,9 +1,12 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
+#
+# Runs bootloader, boundary, and opcode tests seamlessly in both RTL
+# and Gate-Level (GL) simulation modes.
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge, FallingEdge
+from cocotb.triggers import ClockCycles, RisingEdge
 
 # ---------------------------------------------------------------------
 # Assembler / Instruction Encoding Helpers
@@ -32,8 +35,11 @@ def words_to_bytes(words):
 CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
 
 
+# Helper sequence to configure GPIO_DIR[7] = 1 (address 0xF2) using r6 and r7
+# (Preserves r1-r5 state for test comparisons)
 def gpio_dir_setup_words():
     return [
+        # Build r6 = 0xF2 (242)
         itype('ADDI', 6, 0, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
@@ -42,11 +48,13 @@ def gpio_dir_setup_words():
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 25),
+        # Build r7 = 0x80 (128)
         itype('ADDI', 7, 0, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 4),
+        # Store r7 (0x80) to [r6] (0xF2)
         itype('SW', 7, 6, 0),
     ]
 
@@ -64,39 +72,35 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 100)
+    await ClockCycles(dut.clk, 5)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 50)
+    await ClockCycles(dut.clk, 1)
 
 
 def get_halted(dut):
-    """Checks HALT state across standard RTL hierarchy and GL netlist aliases."""
-    paths = [
-        lambda: dut.user_project.core.halted.value,
-        lambda: dut.core.halted.value,
-        lambda: dut.user_project.halted.value,
-        lambda: dut.user_project.i_core.halted.value,
-    ]
-    for path in paths:
-        try:
-            val = path()
-            if val.is_resolvable:
-                return int(val) == 1
-        except (AttributeError, ValueError):
-            pass
-
+    """Safely checks HALT state in RTL across hierarchy levels and GL mode."""
+    # Hierarchy path 1: Standard RTL core instance
     try:
-        uo_val = dut.uo_out.value
-        if uo_val.is_resolvable and (int(uo_val) & 0x80):
-            return True
-    except (ValueError, TypeError, AttributeError):
+        val = dut.user_project.core.halted.value
+        if val.is_resolvable:
+            return int(val) == 1
+    except (AttributeError, ValueError):
         pass
 
+    # Hierarchy path 2: Direct RTL core instance alternative
     try:
-        uio_val = dut.uio_out.value
-        if uio_val.is_resolvable and (int(uio_val) & 0x80):
-            return True
-    except (ValueError, TypeError, AttributeError):
+        val = dut.core.halted.value
+        if val.is_resolvable:
+            return int(val) == 1
+    except (AttributeError, ValueError):
+        pass
+
+    # Fallback path 3: GL mode check on uo_out[7]
+    try:
+        val = dut.uo_out.value
+        if val.is_resolvable:
+            return (int(val) & 0x80) != 0
+    except (AttributeError, ValueError, TypeError):
         pass
 
     return False
@@ -106,24 +110,13 @@ def poke_fmem(dut, byte_addr, value):
     dut.fmem[byte_addr].value = value
 
 
-def poke_smem(dut, byte_addr, value):
-    try:
-        dut.smem[byte_addr].value = value
-    except AttributeError:
-        poke_fmem(dut, byte_addr, value)
-
-
 def load_flash_image(dut, words, base=0):
+    """Pokes an assembled program into the flash behavioral model in tb.v."""
     for i, b in enumerate(words_to_bytes(words)):
         poke_fmem(dut, base + i, b)
 
 
-def load_ram_image(dut, words, base=0):
-    for i, b in enumerate(words_to_bytes(words)):
-        poke_smem(dut, base + i, b)
-
-
-async def wait_halted(dut, max_cycles=800_000):
+async def wait_halted(dut, max_cycles=400_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -133,47 +126,81 @@ async def wait_halted(dut, max_cycles=800_000):
 
 
 def reg(dut, n):
+    """Safely retrieves register values, returning None if running in GL mode."""
     if n == 0:
         return 0
-    paths = [
-        lambda: dut.user_project.core.regfile.regs[n].value,
-        lambda: dut.core.regfile.regs[n].value,
-        lambda: dut.user_project.i_core.regfile.regs[n].value,
-    ]
-    for path in paths:
-        try:
-            val = path()
-            if val.is_resolvable:
-                return int(val)
-        except (AttributeError, ValueError):
-            pass
+    try:
+        val = dut.user_project.core.regfile.regs[n].value
+        if val.is_resolvable:
+            return int(val)
+    except (AttributeError, ValueError):
+        pass
+
+    try:
+        val = dut.core.regfile.regs[n].value
+        if val.is_resolvable:
+            return int(val)
+    except (AttributeError, ValueError):
+        pass
+
     return None
 
 
 def pc(dut):
-    paths = [
-        lambda: dut.user_project.core.pc.value,
-        lambda: dut.core.pc.value,
-        lambda: dut.user_project.i_core.pc.value,
-    ]
-    for path in paths:
-        try:
-            val = path()
-            if val.is_resolvable:
-                return int(val)
-        except (AttributeError, ValueError):
-            pass
+    """Safely retrieves program counter value, returning None in GL mode."""
+    try:
+        val = dut.user_project.core.pc.value
+        if val.is_resolvable:
+            return int(val)
+    except (AttributeError, ValueError):
+        pass
+
+    try:
+        val = dut.core.pc.value
+        if val.is_resolvable:
+            return int(val)
+    except (AttributeError, ValueError):
+        pass
+
     return None
 
 
 # ---------------------------------------------------------------------
-# Test 1: Bootloader / Basic RAM Program Execution
+# Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
+
+GPIO_HOLD_CYCLES = 150
+
+
+async def set_gpio(dut, data, clock, start):
+    dut.ui_in.value = (int(start) << 2) | (int(clock) << 1) | int(data)
+
+
+async def send_bit(dut, bit):
+    await set_gpio(dut, bit, 0, 1)
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
+    await set_gpio(dut, bit, 1, 1)  # Clock high
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
+    await set_gpio(dut, bit, 0, 1)  # Clock low
+    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
+
+
+async def send_byte_gpio(dut, byte):
+    for i in range(7, -1, -1):
+        await send_bit(dut, (byte >> i) & 1)
+
 
 @cocotb.test()
 async def test_bootloader(dut):
-    """Loads a program image directly into RAM/Flash and verifies execution."""
+    """
+    Bit-bangs a program into shared_ram over ui_in[0:2] using boot_rom,
+    then asserts execution results. Matches tb_bootloader.v's scenario.
+    """
     await start_clock(dut)
+    await reset_dut(dut)
+
+    # Give chip time to enter boot_rom's WAIT_START loop
+    await ClockCycles(dut.clk, 100)
 
     prog_words = [
         itype('ADDI', 1, 0, 5),
@@ -183,9 +210,12 @@ async def test_bootloader(dut):
         itype('HALT', 0, 0, 0),
     ]
 
-    load_ram_image(dut, prog_words)
-    load_flash_image(dut, prog_words)
-    await reset_dut(dut)
+    prog = words_to_bytes(prog_words)
+
+    await send_byte_gpio(dut, len(prog))
+    for b in prog:
+        await send_byte_gpio(dut, b)
+    await set_gpio(dut, 0, 0, 0)
 
     await wait_halted(dut)
 
@@ -201,6 +231,7 @@ async def test_bootloader(dut):
 
 @cocotb.test()
 async def test_boundary_continuity(dut):
+    """Executes code straddling the 0x0100 IMEM boundary."""
     await start_clock(dut)
 
     setup = gpio_dir_setup_words()
@@ -209,6 +240,7 @@ async def test_boundary_continuity(dut):
         itype('ADDI', 6, 6, 1)
     ]
 
+    # Calculate required NOP padding to cross 0x0100 boundary (128 words total)
     pad_count = 128 - len(words) - 2
     if pad_count > 0:
         words += [itype('NOP', 0, 0, 0)] * pad_count
@@ -234,6 +266,7 @@ async def test_boundary_continuity(dut):
 
 @cocotb.test()
 async def test_flash_regression(dut):
+    """Executes ALU operations and PSRAM read/writes from Flash."""
     await start_clock(dut)
 
     prog = [
@@ -287,31 +320,22 @@ FULL_REGRESSION_WORDS = gpio_dir_setup_words() + [
 
 @cocotb.test()
 async def test_full_opcode_regression(dut):
+    """Executes every ISA opcode from external Flash."""
     await start_clock(dut)
 
     load_flash_image(dut, FULL_REGRESSION_WORDS)
     dut.ui_in.value = 0
     await reset_dut(dut)
 
-    # Monitor for entry into flash mode across hierarchy or fall back safely
-    in_flash_mode = False
-    for _ in range(30_000):
-        await RisingEdge(dut.clk)
-        paths = [
-            lambda: dut.user_project.flash_mode_r.value,
-            lambda: dut.user_project.core.flash_mode_r.value,
-            lambda: dut.core.flash_mode_r.value,
-        ]
-        for path in paths:
-            try:
-                val = path()
-                if val.is_resolvable and int(val) == 1:
-                    in_flash_mode = True
-                    break
-            except (AttributeError, ValueError):
-                pass
-        if in_flash_mode:
-            break
+    # Wait out the bootloader timeout into flash_mode
+    try:
+        for _ in range(10_000):
+            await RisingEdge(dut.clk)
+            val = dut.user_project.flash_mode_r.value
+            if val.is_resolvable and int(val) == 1:
+                break
+    except (AttributeError, ValueError):
+        await ClockCycles(dut.clk, 25_000)
 
     dut.ui_in.value = 0x55
 
