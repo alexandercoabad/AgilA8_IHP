@@ -64,14 +64,13 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 30)  # Extended reset pulse for GL gate settling
+    await ClockCycles(dut.clk, 30)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 10)
 
 
 def get_halted(dut):
     """Checks HALT state across standard RTL hierarchy and GL netlist aliases."""
-    # Check RTL Hierarchy Paths
     for path in [
         lambda: dut.user_project.core.halted.value,
         lambda: dut.core.halted.value,
@@ -82,7 +81,6 @@ def get_halted(dut):
         except (AttributeError, ValueError):
             pass
 
-    # Fallback to Top-Level Output Pins (GL Simulation Mode)
     try:
         uo_val = int(dut.uo_out.value)
         uio_val = int(dut.uio_out.value)
@@ -139,11 +137,11 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 50
+# 2 cycles per edge allows bit-banging to finish well under the 400k cycle limit
+GPIO_HOLD_CYCLES = 2
 
 
 async def set_gpio(dut, data, clock, start):
-    # Align pin changes strictly to the falling clock edge to prevent setup violations
     await FallingEdge(dut.clk)
     dut.ui_in.value = (int(start) << 2) | (int(clock) << 1) | int(data)
 
@@ -169,7 +167,7 @@ async def test_bootloader(dut):
     await reset_dut(dut)
 
     # Allow bootloader FSM to settle into reception state
-    await ClockCycles(dut.clk, 200)
+    await ClockCycles(dut.clk, 20)
 
     prog_words = [
         itype('ADDI', 1, 0, 5),
