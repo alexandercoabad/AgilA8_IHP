@@ -87,10 +87,11 @@ def get_halted(dut):
     except (AttributeError, ValueError):
         pass
 
-    # Fallback path 3: Gate-Level mode check on uo_out[7] pin
+    # Fallback path 3: Gate-Level mode check on uo_out[7] or uio_out[7] pin
     try:
-        val = int(dut.uo_out.value)
-        return (val & 0x80) != 0
+        uo_val = int(dut.uo_out.value)
+        uio_val = int(dut.uio_out.value)
+        return ((uo_val & 0x80) != 0) or ((uio_val & 0x80) != 0)
     except (ValueError, TypeError):
         return False
 
