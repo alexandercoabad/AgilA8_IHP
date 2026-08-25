@@ -36,10 +36,8 @@ CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
 
 
 # Helper sequence to configure GPIO_DIR[7] = 1 (address 0xF2) using r6 and r7
-# (Preserves r1-r5 state for test comparisons)
 def gpio_dir_setup_words():
     return [
-        # Build r6 = 0xF2 (242)
         itype('ADDI', 6, 0, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
@@ -48,13 +46,11 @@ def gpio_dir_setup_words():
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 25),
-        # Build r7 = 0x80 (128)
         itype('ADDI', 7, 0, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 4),
-        # Store r7 (0x80) to [r6] (0xF2)
         itype('SW', 7, 6, 0),
     ]
 
@@ -77,15 +73,26 @@ async def reset_dut(dut):
     await ClockCycles(dut.clk, 10)
 
 
+def is_gl_simulation(dut):
+    """Detects whether running under Gate-Level simulation."""
+    try:
+        _ = dut.user_project.core.halted
+        return False
+    except AttributeError:
+        try:
+            _ = dut.core.halted
+            return False
+        except AttributeError:
+            return True
+
+
 def get_halted(dut):
     """Safely checks HALT state in RTL across hierarchy levels and GL mode."""
-    paths = [
+    # 1. Check RTL internal signals first
+    for path in [
         lambda: dut.user_project.core.halted.value,
         lambda: dut.core.halted.value,
-        lambda: getattr(dut.user_project, "core.halted").value,
-        lambda: getattr(dut, "user_project.core.halted").value,
-    ]
-    for path in paths:
+    ]:
         try:
             val = path()
             if val.is_resolvable:
@@ -93,17 +100,17 @@ def get_halted(dut):
         except (AttributeError, ValueError):
             pass
 
-    # Fallback path: GL mode check on uo_out[7] or uio_out[7]
+    # 2. GL Fallback: Check uo_out bit 7 and uio_out bit 7
     try:
         val = dut.uo_out.value
-        if val.is_resolvable and (int(val) & 0x80):
+        if val.is_resolvable and (int(val) & 0x80) != 0:
             return True
     except (AttributeError, ValueError, TypeError):
         pass
 
     try:
         val = dut.uio_out.value
-        if val.is_resolvable and (int(val) & 0x80):
+        if val.is_resolvable and (int(val) & 0x80) != 0:
             return True
     except (AttributeError, ValueError, TypeError):
         pass
@@ -121,7 +128,7 @@ def load_flash_image(dut, words, base=0):
         poke_fmem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=1_500_000):
+async def wait_halted(dut, max_cycles=400_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -134,11 +141,10 @@ def reg(dut, n):
     """Safely retrieves register values, returning None if running in GL mode."""
     if n == 0:
         return 0
-    paths = [
+    for path in [
         lambda: dut.user_project.core.regfile.regs[n].value,
         lambda: dut.core.regfile.regs[n].value,
-    ]
-    for path in paths:
+    ]:
         try:
             val = path()
             if val.is_resolvable:
@@ -150,11 +156,10 @@ def reg(dut, n):
 
 def pc(dut):
     """Safely retrieves program counter value, returning None in GL mode."""
-    paths = [
+    for path in [
         lambda: dut.user_project.core.pc.value,
         lambda: dut.core.pc.value,
-    ]
-    for path in paths:
+    ]:
         try:
             val = path()
             if val.is_resolvable:
@@ -198,7 +203,6 @@ async def test_bootloader(dut):
     await start_clock(dut)
     await reset_dut(dut)
 
-    # Give chip time to enter boot_rom's WAIT_START loop
     await ClockCycles(dut.clk, 100)
 
     prog_words = [
@@ -216,7 +220,9 @@ async def test_bootloader(dut):
         await send_byte_gpio(dut, b)
     await set_gpio(dut, 0, 0, 0)
 
-    await wait_halted(dut, max_cycles=1_500_000)
+    # In GL mode, wait extra cycles for execution
+    cycles = 500_000 if is_gl_simulation(dut) else 100_000
+    await wait_halted(dut, max_cycles=cycles)
 
     if reg(dut, 1) is not None:
         assert reg(dut, 1) == 5, f"r1 should be 5, got {reg(dut, 1)}"
@@ -239,7 +245,6 @@ async def test_boundary_continuity(dut):
         itype('ADDI', 6, 6, 1)
     ]
 
-    # Calculate required NOP padding to cross 0x0100 boundary (128 words total)
     pad_count = 128 - len(words) - 2
     if pad_count > 0:
         words += [itype('NOP', 0, 0, 0)] * pad_count
@@ -252,7 +257,8 @@ async def test_boundary_continuity(dut):
     load_flash_image(dut, words)
     await reset_dut(dut)
 
-    await wait_halted(dut)
+    cycles = 500_000 if is_gl_simulation(dut) else 100_000
+    await wait_halted(dut, max_cycles=cycles)
 
     if pc(dut) is not None:
         assert reg(dut, 5) == 17, f"r5={reg(dut, 5)}, expected 17"
@@ -286,7 +292,8 @@ async def test_flash_regression(dut):
     load_flash_image(dut, prog)
     await reset_dut(dut)
 
-    await wait_halted(dut)
+    cycles = 500_000 if is_gl_simulation(dut) else 100_000
+    await wait_halted(dut, max_cycles=cycles)
 
     if reg(dut, 1) is not None:
         assert reg(dut, 1) == 15
@@ -338,7 +345,8 @@ async def test_full_opcode_regression(dut):
 
     dut.ui_in.value = 0x55
 
-    await wait_halted(dut)
+    cycles = 500_000 if is_gl_simulation(dut) else 100_000
+    await wait_halted(dut, max_cycles=cycles)
 
     if reg(dut, 1) is not None:
         assert reg(dut, 1) == 1, f"r1={reg(dut, 1)}, expected 1"
