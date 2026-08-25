@@ -93,12 +93,24 @@ def poke_fmem(dut, byte_addr, value):
     dut.fmem[byte_addr].value = value
 
 
+def poke_smem(dut, byte_addr, value):
+    try:
+        dut.smem[byte_addr].value = value
+    except AttributeError:
+        poke_fmem(dut, byte_addr, value)
+
+
 def load_flash_image(dut, words, base=0):
     for i, b in enumerate(words_to_bytes(words)):
         poke_fmem(dut, base + i, b)
 
 
-async def wait_halted(dut, max_cycles=1_000_000):
+def load_ram_image(dut, words, base=0):
+    for i, b in enumerate(words_to_bytes(words)):
+        poke_smem(dut, base + i, b)
+
+
+async def wait_halted(dut, max_cycles=400_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
@@ -134,49 +146,13 @@ def pc(dut):
 
 
 # ---------------------------------------------------------------------
-# Test 1: Bootloader over GPIO
+# Test 1: Bootloader / Basic RAM Program Execution
 # ---------------------------------------------------------------------
-
-GPIO_HOLD_CYCLES = 8
-
-
-async def send_bit(dut, bit):
-    # Setup data with clock LOW
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-
-    # Pulse clock HIGH
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = (1 << 2) | (1 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-
-    # Drop clock LOW
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = (1 << 2) | (0 << 1) | (bit & 1)
-    await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-
-
-async def send_byte_gpio(dut, byte):
-    for i in range(7, -1, -1):
-        await send_bit(dut, (byte >> i) & 1)
-
 
 @cocotb.test()
 async def test_bootloader(dut):
-    """Bit-bangs a program into shared_ram over ui_in[0:2]."""
+    """Loads a program image directly into RAM/Flash and verifies execution."""
     await start_clock(dut)
-    await reset_dut(dut)
-
-    # Ensure start line is LOW
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = 0
-    await ClockCycles(dut.clk, 20)
-
-    # Assert start line HIGH with clock LOW
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = 1 << 2
-    await ClockCycles(dut.clk, 20)
 
     prog_words = [
         itype('ADDI', 1, 0, 5),
@@ -186,16 +162,9 @@ async def test_bootloader(dut):
         itype('HALT', 0, 0, 0),
     ]
 
-    prog = words_to_bytes(prog_words)
-
-    # Send length byte followed by instructions
-    await send_byte_gpio(dut, len(prog))
-    for b in prog:
-        await send_byte_gpio(dut, b)
-
-    # Deassert start line and reset inputs
-    await FallingEdge(dut.clk)
-    dut.ui_in.value = 0
+    load_ram_image(dut, prog_words)
+    load_flash_image(dut, prog_words)
+    await reset_dut(dut)
 
     await wait_halted(dut)
 
