@@ -6,7 +6,7 @@
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
+from cocotb.triggers import ClockCycles, RisingEdge, FallingEdge
 
 # ---------------------------------------------------------------------
 # Assembler / Instruction Encoding Helpers
@@ -36,10 +36,8 @@ CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
 
 
 # Helper sequence to configure GPIO_DIR[7] = 1 (address 0xF2) using r6 and r7
-# (Preserves r1-r5 state for test comparisons)
 def gpio_dir_setup_words():
     return [
-        # Build r6 = 0xF2 (242)
         itype('ADDI', 6, 0, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
@@ -48,13 +46,11 @@ def gpio_dir_setup_words():
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 31),
         itype('ADDI', 6, 6, 25),
-        # Build r7 = 0x80 (128)
         itype('ADDI', 7, 0, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 31),
         itype('ADDI', 7, 7, 4),
-        # Store r7 (0x80) to [r6] (0xF2)
         itype('SW', 7, 6, 0),
     ]
 
@@ -72,9 +68,9 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
+    await ClockCycles(dut.clk, 20)  # Extended reset pulse for gate-level cells
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 5)
 
 
 def get_halted(dut):
@@ -91,11 +87,11 @@ def get_halted(dut):
     except (AttributeError, ValueError):
         pass
 
-    # Fallback path 3: GL mode check on uo_out[7]
+    # Fallback path 3: Gate-Level mode check on uo_out[7] pin
     try:
         val = int(dut.uo_out.value)
         return (val & 0x80) != 0
-    except ValueError:
+    except (ValueError, TypeError):
         return False
 
 
@@ -150,10 +146,11 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 150
+GPIO_HOLD_CYCLES = 100
 
 
 async def set_gpio(dut, data, clock, start):
+    await FallingEdge(dut.clk)
     dut.ui_in.value = (int(start) << 2) | (int(clock) << 1) | int(data)
 
 
@@ -221,7 +218,6 @@ async def test_boundary_continuity(dut):
         itype('ADDI', 6, 6, 1)
     ]
     
-    # Calculate required NOP padding to cross 0x0100 boundary (128 words total)
     pad_count = 128 - len(words) - 2
     if pad_count > 0:
         words += [itype('NOP', 0, 0, 0)] * pad_count
@@ -312,7 +308,7 @@ async def test_full_opcode_regression(dut):
     try:
         for _ in range(10_000):
             await RisingEdge(dut.clk)
-            if dut.user_project.flash_mode_r.value == 1:
+            if int(dut.user_project.flash_mode_r.value) == 1:
                 break
     except (AttributeError, ValueError):
         await ClockCycles(dut.clk, 25_000)
