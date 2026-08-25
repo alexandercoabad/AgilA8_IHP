@@ -1,8 +1,5 @@
 # SPDX-FileCopyrightText: © 2024 Tiny Tapeout
 # SPDX-License-Identifier: Apache-2.0
-#
-# Runs bootloader, boundary, and opcode tests seamlessly in both RTL
-# and Gate-Level (GL) simulation modes.
 
 import cocotb
 from cocotb.clock import Clock
@@ -35,7 +32,6 @@ def words_to_bytes(words):
 CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
 
 
-# Helper sequence to configure GPIO_DIR[7] = 1 (address 0xF2) using r6 and r7
 def gpio_dir_setup_words():
     return [
         itype('ADDI', 6, 0, 31),
@@ -68,30 +64,29 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 20)  # Extended reset pulse for gate-level cells
+    await ClockCycles(dut.clk, 30)  # Extended reset pulse for GL gate settling
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 5)
+    await ClockCycles(dut.clk, 10)
 
 
 def get_halted(dut):
-    """Safely checks HALT state in RTL across hierarchy levels and GL mode."""
-    # Hierarchy path 1: Standard RTL core instance
-    try:
-        return int(dut.user_project.core.halted.value) == 1
-    except (AttributeError, ValueError):
-        pass
+    """Checks HALT state across standard RTL hierarchy and GL netlist aliases."""
+    # Check RTL Hierarchy Paths
+    for path in [
+        lambda: dut.user_project.core.halted.value,
+        lambda: dut.core.halted.value,
+        lambda: dut.user_project.halted.value,
+    ]:
+        try:
+            return int(path()) == 1
+        except (AttributeError, ValueError):
+            pass
 
-    # Hierarchy path 2: Direct RTL core instance alternative
-    try:
-        return int(dut.core.halted.value) == 1
-    except (AttributeError, ValueError):
-        pass
-
-    # Fallback path 3: Gate-Level mode check on uo_out[7] or uio_out[7] pin
+    # Fallback to Top-Level Output Pins (GL Simulation Mode)
     try:
         uo_val = int(dut.uo_out.value)
         uio_val = int(dut.uio_out.value)
-        return ((uo_val & 0x80) != 0) or ((uio_val & 0x80) != 0)
+        return bool((uo_val & 0x80) or (uio_val & 0x80))
     except (ValueError, TypeError):
         return False
 
@@ -101,7 +96,6 @@ def poke_fmem(dut, byte_addr, value):
 
 
 def load_flash_image(dut, words, base=0):
-    """Pokes an assembled program into the flash behavioral model in tb.v."""
     for i, b in enumerate(words_to_bytes(words)):
         poke_fmem(dut, base + i, b)
 
@@ -116,7 +110,6 @@ async def wait_halted(dut, max_cycles=400_000):
 
 
 def reg(dut, n):
-    """Safely retrieves register values, returning None if running in GL mode."""
     if n == 0:
         return 0
     try:
@@ -131,7 +124,6 @@ def reg(dut, n):
 
 
 def pc(dut):
-    """Safely retrieves program counter value, returning None in GL mode."""
     try:
         return int(dut.user_project.core.pc.value)
     except (AttributeError, ValueError):
@@ -147,10 +139,11 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 100
+GPIO_HOLD_CYCLES = 50
 
 
 async def set_gpio(dut, data, clock, start):
+    # Align pin changes strictly to the falling clock edge to prevent setup violations
     await FallingEdge(dut.clk)
     dut.ui_in.value = (int(start) << 2) | (int(clock) << 1) | int(data)
 
@@ -158,9 +151,9 @@ async def set_gpio(dut, data, clock, start):
 async def send_bit(dut, bit):
     await set_gpio(dut, bit, 0, 1)
     await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-    await set_gpio(dut, bit, 1, 1)  # Clock high
+    await set_gpio(dut, bit, 1, 1)  # Clock pulse HIGH
     await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
-    await set_gpio(dut, bit, 0, 1)  # Clock low
+    await set_gpio(dut, bit, 0, 1)  # Clock pulse LOW
     await ClockCycles(dut.clk, GPIO_HOLD_CYCLES)
 
 
@@ -171,15 +164,12 @@ async def send_byte_gpio(dut, byte):
 
 @cocotb.test()
 async def test_bootloader(dut):
-    """
-    Bit-bangs a program into shared_ram over ui_in[0:2] using boot_rom,
-    then asserts execution results. Matches tb_bootloader.v's scenario.
-    """
+    """Bit-bangs a program into shared_ram over ui_in[0:2]."""
     await start_clock(dut)
     await reset_dut(dut)
 
-    # Give chip time to enter boot_rom's WAIT_START loop
-    await ClockCycles(dut.clk, 100)
+    # Allow bootloader FSM to settle into reception state
+    await ClockCycles(dut.clk, 200)
 
     prog_words = [
         itype('ADDI', 1, 0, 5),
@@ -191,6 +181,7 @@ async def test_bootloader(dut):
 
     prog = words_to_bytes(prog_words)
 
+    # Transmit program payload length followed by instruction bytes
     await send_byte_gpio(dut, len(prog))
     for b in prog:
         await send_byte_gpio(dut, b)
@@ -210,7 +201,6 @@ async def test_bootloader(dut):
 
 @cocotb.test()
 async def test_boundary_continuity(dut):
-    """Executes code straddling the 0x0100 IMEM boundary."""
     await start_clock(dut)
 
     setup = gpio_dir_setup_words()
@@ -218,7 +208,7 @@ async def test_boundary_continuity(dut):
         itype('ADDI', 6, 0, 0),
         itype('ADDI', 6, 6, 1)
     ]
-    
+
     pad_count = 128 - len(words) - 2
     if pad_count > 0:
         words += [itype('NOP', 0, 0, 0)] * pad_count
@@ -244,7 +234,6 @@ async def test_boundary_continuity(dut):
 
 @cocotb.test()
 async def test_flash_regression(dut):
-    """Executes ALU operations and PSRAM read/writes from Flash."""
     await start_clock(dut)
 
     prog = [
@@ -298,14 +287,12 @@ FULL_REGRESSION_WORDS = gpio_dir_setup_words() + [
 
 @cocotb.test()
 async def test_full_opcode_regression(dut):
-    """Executes every ISA opcode from external Flash."""
     await start_clock(dut)
 
     load_flash_image(dut, FULL_REGRESSION_WORDS)
     dut.ui_in.value = 0
     await reset_dut(dut)
 
-    # Wait out the bootloader timeout into flash_mode
     try:
         for _ in range(10_000):
             await RisingEdge(dut.clk)
