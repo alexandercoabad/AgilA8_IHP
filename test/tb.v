@@ -30,6 +30,8 @@ module tb ();
   wire [7:0] uio_oe;
 
 `ifdef USE_POWER_PINS
+  wire VDD = 1'b1;
+  wire VSS = 1'b0;
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
 `endif
@@ -38,6 +40,8 @@ module tb ();
   tt_um_agila8 user_project (
 
 `ifdef USE_POWER_PINS
+        .VDD(VDD),
+        .VSS(VSS),
         .VPWR(VPWR),
         .VGND(VGND),
 `endif
