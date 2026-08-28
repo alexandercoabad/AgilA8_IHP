@@ -116,32 +116,40 @@ async def start_clock(dut):
 
 
 async def reset_dut(dut):
+    """Holds reset active for extended cycles to flush GL flip-flops properly."""
     dut.ena.value = 1
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
+    # Hold reset low for 50 cycles to purge gate-level unknown X states
+    await ClockCycles(dut.clk, 50)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 2)
+
+
+def get_signal_val(signal_handle):
+    """Safely retrieves integer value from a signal handle if valid."""
+    try:
+        val = signal_handle.value
+        return int(val)
+    except (AttributeError, ValueError):
+        return None
 
 
 def get_halted(dut):
     """Safely checks HALT state in RTL across hierarchy levels and GL mode."""
-    try:
-        return int(dut.user_project.core.halted.value) == 1
-    except (AttributeError, ValueError):
-        pass
+    val = get_signal_val(getattr(getattr(getattr(dut, 'user_project', None), 'core', None), 'halted', None))
+    if val is not None and val == 1:
+        return True
 
-    try:
-        return int(dut.core.halted.value) == 1
-    except (AttributeError, ValueError):
-        pass
+    val = get_signal_val(getattr(getattr(dut, 'core', None), 'halted', None))
+    if val is not None and val == 1:
+        return True
 
-    try:
-        val = int(dut.uo_out.value)
+    val = get_signal_val(dut.uo_out)
+    if val is not None:
         return (val & 0x80) != 0
-    except ValueError:
-        return False
+    return False
 
 
 def poke_fmem(dut, byte_addr, value):
@@ -167,28 +175,29 @@ def reg(dut, n):
     """Safely retrieves register values, returning None if running in GL mode."""
     if n == 0:
         return 0
-    try:
-        return int(dut.user_project.core.regfile.regs[n].value)
-    except (AttributeError, ValueError):
-        pass
 
-    try:
-        return int(dut.core.regfile.regs[n].value)
-    except (AttributeError, ValueError):
-        return None
+    val = get_signal_val(getattr(getattr(getattr(getattr(dut, 'user_project', None), 'core', None), 'regfile', None), 'regs', [None]*8)[n])
+    if val is not None:
+        return val
+
+    val = get_signal_val(getattr(getattr(getattr(dut, 'core', None), 'regfile', None), 'regs', [None]*8)[n])
+    if val is not None:
+        return val
+
+    return None
 
 
 def pc(dut):
     """Safely retrieves program counter value, returning None in GL mode."""
-    try:
-        return int(dut.user_project.core.pc.value)
-    except (AttributeError, ValueError):
-        pass
+    val = get_signal_val(getattr(getattr(getattr(dut, 'user_project', None), 'core', None), 'pc', None))
+    if val is not None:
+        return val
 
-    try:
-        return int(dut.core.pc.value)
-    except (AttributeError, ValueError):
-        return None
+    val = get_signal_val(getattr(getattr(dut, 'core', None), 'pc', None))
+    if val is not None:
+        return val
+
+    return None
 
 
 # ---------------------------------------------------------------------
@@ -280,8 +289,7 @@ async def test_boundary_continuity(dut):
 
     cycles = await wait_halted(dut)
 
-    # Tightened bound: Correct single pass takes ~24k-25k cycles.
-    # Spurious flash rebase bug takes ~45,485 cycles.
+    # Bound allowance for single pass execution
     MAX_CORRECT_CYCLES = 35_000
     assert cycles < MAX_CORRECT_CYCLES, (
         f"Execution took {cycles} cycles (limit {MAX_CORRECT_CYCLES}). "
@@ -372,11 +380,16 @@ async def test_full_opcode_regression(dut):
     dut.ui_in.value = 0
     await reset_dut(dut)
 
+    # Safe wait loop for flash mode transition
     try:
-        for _ in range(10_000):
-            await RisingEdge(dut.clk)
-            if dut.user_project.flash_mode_r.value == 1:
-                break
+        flash_mode_signal = getattr(getattr(dut, 'user_project', None), 'flash_mode_r', None)
+        if flash_mode_signal is not None:
+            for _ in range(10_000):
+                await RisingEdge(dut.clk)
+                if get_signal_val(flash_mode_signal) == 1:
+                    break
+        else:
+            await ClockCycles(dut.clk, 25_000)
     except (AttributeError, ValueError):
         await ClockCycles(dut.clk, 25_000)
 
