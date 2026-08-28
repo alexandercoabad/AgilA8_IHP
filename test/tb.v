@@ -1,14 +1,27 @@
 `default_nettype none
 `timescale 1ns / 1fs
 
+/* This testbench instantiates the module, wires up convenient signals
+   for cocotb's test.py, and also hosts a behavioral flash + PSRAM
+   model (ported from tb_regression.v / tb_boundary.v) on the shared
+   QSPI bus.
+*/
 module tb ();
 
-  // Dump the signals to a VCD file.
+  // Dump the signals to a VCD/FST file for GTKWave / Surfer inspection
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
+
+  // Global power nets for gate-level standard cells if required
+`ifdef GL_TEST
+  wire VPWR;
+  wire VGND;
+  assign VPWR = 1'b1;
+  assign VGND = 1'b0;
+`endif
 
   // Wire up the inputs and outputs:
   reg clk;
@@ -20,7 +33,7 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Instantiate user project without explicit power connections to ensure gate-level compatibility
+  // Instantiate the project top module
   tt_um_agila8 user_project (
       .ui_in   (ui_in),    // Dedicated inputs
       .uo_out  (uo_out),   // Dedicated outputs
@@ -32,7 +45,8 @@ module tb ();
       .rst_n   (rst_n)     // reset
   );
 
-  // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model
+  // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model on
+  // the shared QSPI bus.
   wire flash_cs_n = uio_out[0];
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
