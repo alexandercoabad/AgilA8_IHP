@@ -7,9 +7,6 @@ TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
 PROJECT_SOURCES = *.v
 
-# Force default simulator timescale to 1ns/1ps
-COMPILE_ARGS += -gtimescale=1ns/1ps
-
 ifneq ($(GATES),yes)
 
 # RTL simulation:
