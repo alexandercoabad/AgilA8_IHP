@@ -30,16 +30,16 @@ module tb ();
   wire [7:0] uio_oe;
 
 `ifdef USE_POWER_PINS
-  wire VDD = 1'b1;
-  wire VSS = 1'b0;
+  wire VPWR = 1'b1;
+  wire VGND = 1'b0;
 `endif
 
   // Replace tt_um_example with your module name:
   tt_um_agila8 user_project (
 
 `ifdef USE_POWER_PINS
-        .VDD(VDD),
-        .VSS(VSS),
+        .VPWR(VPWR),
+        .VGND(VGND),
 `endif
 
       .ui_in   (ui_in),    // Dedicated inputs
@@ -54,15 +54,6 @@ module tb ();
 
   // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model on
   // the shared QSPI bus - ported verbatim from tb_regression.v.
-  //
-  // fmem/pmem start uninitialized (X) - cocotb tests MUST poke the
-  // bytes they need into fmem (and pmem, if relevant) before releasing
-  // reset. Reading an unpoked flash byte returns X in simulation, which
-  // will very visibly break whatever test relies on it - that's
-  // intentional, not a bug to work around, since a real unprogrammed
-  // flash chip's contents aren't 0x00 either.
-  //--------------------------------------------------------------------
-
   wire flash_cs_n = uio_out[0];
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
