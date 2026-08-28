@@ -32,8 +32,9 @@ def words_to_bytes(words):
     return out
 
 
-# 64 MHz clock period in picoseconds to ensure integer division accuracy in Cocotb
-CLOCK_PERIOD_PS = 15625
+# 15624 ps (~64.004 MHz) yields an exact integer half-period of 7812 ps,
+# avoiding fractional simulation step precision errors in Icarus Verilog.
+CLOCK_PERIOD_PS = 15624
 
 
 # Helper sequence to configure GPIO_DIR = 0xFF (address 0xF2) using r6 and r7
@@ -290,14 +291,12 @@ async def test_boundary_continuity(dut):
 
     cycles = await wait_halted(dut)
 
-    # Bound allowance for single pass execution
     MAX_CORRECT_CYCLES = 35_000
     assert cycles < MAX_CORRECT_CYCLES, (
         f"Execution took {cycles} cycles (limit {MAX_CORRECT_CYCLES}). "
         f"Likely a phantom re-execution from a discontinuous flash_addr rebase bug."
     )
 
-    # Detailed RTL register checks when hierarchy is accessible
     if pc(dut) is not None:
         assert reg(dut, 5) == 17, f"r5={reg(dut, 5)}, expected 17"
         assert reg(dut, 6) == 1, f"r6={reg(dut, 6)}, expected 1"
@@ -381,7 +380,6 @@ async def test_full_opcode_regression(dut):
     dut.ui_in.value = 0
     await reset_dut(dut)
 
-    # Safe wait loop for flash mode transition
     try:
         flash_mode_signal = getattr(getattr(dut, 'user_project', None), 'flash_mode_r', None)
         if flash_mode_signal is not None:
