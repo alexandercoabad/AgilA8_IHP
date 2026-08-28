@@ -21,8 +21,22 @@ COMPILE_ARGS    += -DSIM
 COMPILE_ARGS    += -DNO_SPECIFY
 COMPILE_ARGS    += -gno-specify
 
+# Copy and patch PDK stdcell file locally inside build dir to avoid permission issues and clear specify blocks
+STDCELL_ORIG = $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
+STDCELL_PATCHED = $(SIM_BUILD)/sg13g2_stdcell_patched.v
+
+$(SIM_BUILD):
+	mkdir -p $(SIM_BUILD)
+
+$(STDCELL_PATCHED): | $(SIM_BUILD)
+	@if [ -f "$(STDCELL_ORIG)" ]; then \
+		python3 $(PWD)/patch_ihp_delayed_signals.py "$(STDCELL_ORIG)" > "$@.tmp"; \
+		sed -i '/specify/,/endspecify/d' "$@.tmp"; \
+		mv "$@.tmp" "$@"; \
+	fi
+
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
-VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
+VERILOG_SOURCES += $(STDCELL_PATCHED)
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
 
 endif
