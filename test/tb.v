@@ -1,25 +1,16 @@
 `default_nettype none
 `timescale 1ns / 1fs
 
-/* This testbench instantiates the module, wires up convenient signals
-   for cocotb's test.py, and also hosts a behavioral flash + PSRAM
-   model (ported from tb_regression.v / tb_boundary.v) on the shared
-   QSPI bus. Unlike those standalone testbenches, this one does NOT
-   preload fmem/pmem from a file - cocotb tests poke fmem/pmem
-   directly (dut.fmem[i].value = ...) before releasing reset, so each
-   test can supply its own flash image without needing a separate
-   .hex file and without needing to rebuild this testbench per test.
-*/
 module tb ();
 
-  // Dump the signals to a VCD file. You can view it with gtkwave or surfer.
+  // Dump the signals to a VCD file
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
 
-  // Wire up the inputs and outputs:
+  // Wire up the inputs and outputs
   reg clk;
   reg rst_n;
   reg ena;
@@ -29,31 +20,19 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-`ifdef USE_POWER_PINS
-  wire VPWR = 1'b1;
-  wire VGND = 1'b0;
-`endif
-
-  // Replace tt_um_example with your module name:
+  // Instantiate the gate-level design without power pin overrides if the netlist omits them
   tt_um_agila8 user_project (
-
-`ifdef USE_POWER_PINS
-        .VPWR(VPWR),
-        .VGND(VGND),
-`endif
-
       .ui_in   (ui_in),    // Dedicated inputs
       .uo_out  (uo_out),   // Dedicated outputs
       .uio_in  (uio_in),   // IOs: Input path
       .uio_out (uio_out),  // IOs: Output path
-      .uio_oe  (uio_oe),   // IOs: Enable path (active high: 0=input, 1=output)
-      .ena     (ena),      // enable - goes high when design is selected
+      .uio_oe  (uio_oe),   // IOs: Enable path
+      .ena     (ena),      // enable
       .clk     (clk),      // clock
-      .rst_n   (rst_n)     // not reset
+      .rst_n   (rst_n)     // reset
   );
 
-  // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model on
-  // the shared QSPI bus - ported verbatim from tb_regression.v.
+  // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model
   wire flash_cs_n = uio_out[0];
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
