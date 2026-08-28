@@ -23,6 +23,16 @@ jobs:
         shell: bash
         run: pip install -r test/requirements.txt
 
+      # Patch IHP Standard Cell library if present to prevent Icarus delayed_* signal locks
+      - name: Patch IHP Standard Cell Library for Icarus
+        shell: bash
+        run: |
+          STDCELL_FILE="$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v"
+          if [ -f "$STDCELL_FILE" ]; then
+            python3 test/patch_ihp_delayed_signals.py "$STDCELL_FILE" > "${STDCELL_FILE}.tmp"
+            mv "${STDCELL_FILE}.tmp" "$STDCELL_FILE"
+          fi
+
       - name: Run tests
         run: |
           cd test
