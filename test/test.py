@@ -32,7 +32,8 @@ def words_to_bytes(words):
     return out
 
 
-CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
+# 64 MHz clock period in picoseconds to ensure integer division accuracy in Cocotb
+CLOCK_PERIOD_PS = 15625
 
 
 # Helper sequence to configure GPIO_DIR = 0xFF (address 0xF2) using r6 and r7
@@ -112,14 +113,14 @@ def gpio_data_out_r5_words_clean():
 # ---------------------------------------------------------------------
 
 async def start_clock(dut):
-    cocotb.start_soon(Clock(dut.clk, CLOCK_PERIOD_NS, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, CLOCK_PERIOD_PS, units="ps").start())
 
 
 async def reset_dut(dut):
     """Holds reset active for extended cycles to flush GL flip-flops properly."""
     dut.ena.value = 1
     dut.ui_in.value = 0
-    dut.uio_in.value = 0
+    dut.uio_in_reg.value = 0
     dut.rst_n.value = 0
     # Hold reset low for 50 cycles to purge gate-level unknown X states
     await ClockCycles(dut.clk, 50)
