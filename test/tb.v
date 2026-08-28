@@ -1,9 +1,8 @@
 `default_nettype none
-`timescale 1ns / 1fs
+`timescale 1ns / 1ps
 
 module tb ();
 
-  // Dump signals to VCD for debugging
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
@@ -11,32 +10,39 @@ module tb ();
   end
 
   // Power supply nets for IHP standard cells
-  wire VPWR;
-  wire VGND;
-  assign VPWR = 1'b1;
-  assign VGND = 1'b0;
+  wire VPWR = 1'b1;
+  wire VGND = 1'b0;
 
-  // Signal declarations
   reg clk;
   reg rst_n;
   reg ena;
   reg [7:0] ui_in;
-  reg [7:0] uio_in;
+  
+  // uio_in split-driver to avoid driver contention on bit 2 (MISO)
+  reg [7:0] uio_in_reg;
+  wire [7:0] uio_in;
+  wire miso;
+
+  assign uio_in = {uio_in_reg[7:3], miso, uio_in_reg[1:0]};
+
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Drive default inactive values during startup
   initial begin
     clk = 0;
     rst_n = 0;
     ena = 1;
     ui_in = 0;
-    uio_in = 0;
+    uio_in_reg = 0;
   end
 
-  // Instantiate the gate-level wrapper
+  // Instantiate user project with conditional power pins
   tt_um_agila8 user_project (
+`ifdef USE_POWER_PINS
+      .VPWR(VPWR),
+      .VGND(VGND),
+`endif
       .ui_in   (ui_in),
       .uo_out  (uo_out),
       .uio_in  (uio_in),
@@ -52,9 +58,6 @@ module tb ();
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
   wire psram_cs_n = uio_out[6];
-  reg  miso;
-
-  always @(*) uio_in[2] = miso;
 
   // Flash behavioral model (03h read)
   reg [7:0] fmem [0:511];
@@ -107,10 +110,6 @@ module tb ();
       end
   end
 
-  always @(*) begin
-      if (!flash_cs_n) miso = f_miso;
-      else if (!psram_cs_n) miso = p_miso;
-      else miso = 1'b0;
-  end
+  assign miso = (!flash_cs_n) ? f_miso : ((!psram_cs_n) ? p_miso : 1'b0);
 
 endmodule
