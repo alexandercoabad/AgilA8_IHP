@@ -21,19 +21,9 @@ SIM_BUILD				= sim_build/gl
 COMPILE_ARGS    += -DGL_TEST
 COMPILE_ARGS    += -DFUNCTIONAL
 COMPILE_ARGS    += -DSIM
-COMPILE_ARGS    += -DUSE_POWER_PINS
-COMPILE_ARGS    += -DNO_SPECIFY
 COMPILE_ARGS    += -gno-specify
-
-# Dynamically patch sg13g2_stdcell.v to connect floating delayed_* wires for Icarus
-PATCHED_STDCELL = $(SIM_BUILD)/sg13g2_stdcell_patched.v
-
-$(PATCHED_STDCELL): $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
-	@mkdir -p $(SIM_BUILD)
-	python3 patch_ihp_delayed_signals.py $< > $@
-
 VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
-VERILOG_SOURCES += $(PATCHED_STDCELL)
+VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 
 # this gets copied in by the GDS action workflow
 VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
