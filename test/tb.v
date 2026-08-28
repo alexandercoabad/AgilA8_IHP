@@ -3,24 +3,22 @@
 
 module tb ();
 
-  // Dump signals to VCD for debugging
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
 
-  // Power supply nets for IHP standard cells
+  // Power supply nets for standard cells
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
 
-  // Signal declarations
   reg clk;
   reg rst_n;
   reg ena;
   reg [7:0] ui_in;
 
-  // Split-driver for uio_in to avoid contention on MISO bit (bit 2)
+  // Split-driver array to prevent driver contention on uio_in[2] (MISO)
   reg [7:0] uio_in_reg;
   wire [7:0] uio_in;
   wire miso;
@@ -31,7 +29,6 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Drive default inactive values during startup
   initial begin
     clk = 0;
     rst_n = 0;
@@ -40,7 +37,7 @@ module tb ();
     uio_in_reg = 0;
   end
 
-  // Instantiate the project wrapper
+  // Instantiate top-level module
   tt_um_agila8 user_project (
 `ifdef USE_POWER_PINS
       .VPWR(VPWR),
