@@ -30,16 +30,16 @@ module tb ();
   wire [7:0] uio_oe;
 
 `ifdef USE_POWER_PINS
-  wire VPWR = 1'b1;
-  wire VGND = 1'b0;
+  wire VDD = 1'b1;
+  wire VSS = 1'b0;
 `endif
 
   // Replace tt_um_example with your module name:
   tt_um_agila8 user_project (
 
 `ifdef USE_POWER_PINS
-        .VPWR(VPWR),
-        .VGND(VGND),
+        .VDD(VDD),
+        .VSS(VSS),
 `endif
 
       .ui_in   (ui_in),    // Dedicated inputs
