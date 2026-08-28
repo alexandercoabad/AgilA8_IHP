@@ -3,14 +3,14 @@
 
 module tb ();
 
-  // Dump the signals to a VCD file
+  // Dump the signals to a VCD file.
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
 
-  // Wire up the inputs and outputs
+  // Wire up the inputs and outputs:
   reg clk;
   reg rst_n;
   reg ena;
@@ -20,7 +20,7 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Instantiate the gate-level design without power pin overrides if the netlist omits them
+  // Instantiate user project without explicit power connections to ensure gate-level compatibility
   tt_um_agila8 user_project (
       .ui_in   (ui_in),    // Dedicated inputs
       .uo_out  (uo_out),   // Dedicated outputs
