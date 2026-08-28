@@ -34,17 +34,6 @@ jobs:
         with:
           submodules: recursive
 
-      # Patch IHP Standard Cell Library for Icarus (strips specify blocks and connects delayed_* signals)
-      - name: Patch IHP Standard Cell Library for Icarus
-        shell: bash
-        run: |
-          STDCELL_FILE="$PDK_ROOT/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v"
-          if [ -f "$STDCELL_FILE" ]; then
-            python3 test/patch_ihp_delayed_signals.py "$STDCELL_FILE" > "${STDCELL_FILE}.tmp"
-            sed -i '/specify/,/endspecify/d' "${STDCELL_FILE}.tmp"
-            mv "${STDCELL_FILE}.tmp" "$STDCELL_FILE"
-          fi
-
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttihp26b
 
