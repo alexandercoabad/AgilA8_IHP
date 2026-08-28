@@ -1,29 +1,22 @@
 `default_nettype none
 `timescale 1ns / 1fs
 
-/* This testbench instantiates the module, wires up convenient signals
-   for cocotb's test.py, and also hosts a behavioral flash + PSRAM
-   model (ported from tb_regression.v / tb_boundary.v) on the shared
-   QSPI bus.
-*/
 module tb ();
 
-  // Dump the signals to a VCD/FST file for GTKWave / Surfer inspection
+  // Dump signals to VCD for debugging
   initial begin
     $dumpfile("tb.vcd");
     $dumpvars(0, tb);
     #1;
   end
 
-  // Global power nets for gate-level standard cells if required
-`ifdef GL_TEST
+  // Power supply nets for IHP standard cells
   wire VPWR;
   wire VGND;
   assign VPWR = 1'b1;
   assign VGND = 1'b0;
-`endif
 
-  // Wire up the inputs and outputs:
+  // Signal declarations
   reg clk;
   reg rst_n;
   reg ena;
@@ -33,28 +26,37 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Instantiate the project top module
+  // Drive default inactive values during startup
+  initial begin
+    clk = 0;
+    rst_n = 0;
+    ena = 1;
+    ui_in = 0;
+    uio_in = 0;
+  end
+
+  // Instantiate the gate-level wrapper
   tt_um_agila8 user_project (
-      .ui_in   (ui_in),    // Dedicated inputs
-      .uo_out  (uo_out),   // Dedicated outputs
-      .uio_in  (uio_in),   // IOs: Input path
-      .uio_out (uio_out),  // IOs: Output path
-      .uio_oe  (uio_oe),   // IOs: Enable path
-      .ena     (ena),      // enable
-      .clk     (clk),      // clock
-      .rst_n   (rst_n)     // reset
+      .ui_in   (ui_in),
+      .uo_out  (uo_out),
+      .uio_in  (uio_in),
+      .uio_out (uio_out),
+      .uio_oe  (uio_oe),
+      .ena     (ena),
+      .clk     (clk),
+      .rst_n   (rst_n)
   );
 
-  // Behavioral flash (03h read) + PSRAM (02h write / 03h read) model on
-  // the shared QSPI bus.
+  // QSPI Flash & PSRAM Interface Mapping
   wire flash_cs_n = uio_out[0];
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
   wire psram_cs_n = uio_out[6];
   reg  miso;
+
   always @(*) uio_in[2] = miso;
 
-  // ---- Flash behavioral model (03h read) ----
+  // Flash behavioral model (03h read)
   reg [7:0] fmem [0:511];
   reg [30:0] f_sh; reg [5:0] f_cnt; reg [7:0] f_data; reg f_miso;
   always @(posedge spi_sck or posedge flash_cs_n) begin
@@ -76,7 +78,7 @@ module tb ();
       end
   end
 
-  // ---- PSRAM behavioral model (02h write / 03h read) ----
+  // PSRAM behavioral model (02h write / 03h read)
   reg [7:0] pmem [0:255];
   integer pi; initial for (pi = 0; pi < 256; pi = pi + 1) pmem[pi] = 8'h00;
   reg [5:0] p_cnt; reg [7:0] p_op; reg [23:0] p_addr; reg [7:0] p_wd; reg p_miso;
