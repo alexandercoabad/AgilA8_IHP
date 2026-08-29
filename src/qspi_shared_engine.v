@@ -98,13 +98,7 @@ module qspi_shared_engine #(
 
     //------------------------------------------------------------------
     // spi_ctrl front-end: CTRL register + hit decode + persistent
-    // last-received-byte latch. Entirely local state, unaffected by
-    // sharing the underlying engine - except spi_last_rx below, which
-    // exists *because* of the sharing (sh gets clobbered by whichever
-    // front-end uses the engine next, e.g. every single instruction
-    // fetch, so spi_ctrl's "plain read of DATA returns the last
-    // transfer's byte without retriggering hardware" behavior needs its
-    // own persistent copy rather than reading the shared sh directly).
+    // last-received-byte latch.
     //------------------------------------------------------------------
 
     localparam ADDR_DATA = 8'hF3;
@@ -116,7 +110,7 @@ module qspi_shared_engine #(
     reg [7:0] spi_last_rx;
 
     wire [19:0] spi_half_period =
-        (div_sel == 2'd0) ? 20'd1   :  // matches flash/PSRAM's fastest
+        (div_sel == 2'd0) ? 20'd1   :
         (div_sel == 2'd1) ? 20'd4   :
         (div_sel == 2'd2) ? 20'd16  :
                              20'd64;
@@ -132,10 +126,7 @@ module qspi_shared_engine #(
     reg [1:0]  state;
     reg [39:0] sh;
     reg [5:0]  bitcnt;
-    reg [5:0]  bit_len_r;     // 40 for flash/psram, 8 for spi - latched
-                                // per-transfer so mid-transfer changes
-                                // to what owner "would" request can't
-                                // corrupt an in-flight transfer
+    reg [5:0]  bit_len_r;
     reg        phase;
     reg [19:0] div_cnt;
     reg [19:0] half_period_r;
@@ -164,7 +155,7 @@ module qspi_shared_engine #(
 
     wire flash_want = flash_valid && !just_finished_flash;
     wire psram_want = psram_valid && !just_finished_psram;
-    wire spi_want    = spi_valid && spi_hit && (spi_addr == ADDR_DATA)
+    wire spi_want   = spi_valid && spi_hit && (spi_addr == ADDR_DATA)
                         && spi_we && !just_finished_spi;
 
     wire engine_idle = (state == S_IDLE);
@@ -183,12 +174,10 @@ module qspi_shared_engine #(
     wire [19:0] grant_hperiod = (flash_want || psram_want) ? HALF_PERIOD_CYCLES[19:0]
                                                               : spi_half_period;
 
-    // Moved forward to resolve Verilog elaboration declaration-after-use error
     wire [19:0] low_target   = half_period_r;
     wire [19:0] high_target  = half_period_r + {16'd0, read_delay_r};
     wire [19:0] phase_target = phase ? high_target : low_target;
     wire        phase_done   = (div_cnt >= phase_target - 20'd1) || (phase_target <= 20'd1);
-    wire        done         = (state == S_XFER) && phase && phase_done && (bitcnt == bit_len_r - 6'd1);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -285,7 +274,6 @@ module qspi_shared_engine #(
                         OWNER_FLASH: flash_ready <= 1'b1;
                         OWNER_PSRAM: psram_ready <= 1'b1;
                         OWNER_SPI: begin
-                            spi_ready   <= 1 me_done ? 1'b1 : 1'b1;
                             spi_ready   <= 1'b1;
                             spi_last_rx <= sh[7:0];
                         end
