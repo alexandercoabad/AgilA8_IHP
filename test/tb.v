@@ -9,7 +9,6 @@ module tb ();
     #1;
   end
 
-  // Power supply nets for standard cells
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
 
@@ -18,7 +17,6 @@ module tb ();
   reg ena;
   reg [7:0] ui_in;
 
-  // Split-driver array to prevent driver contention on uio_in[2] (MISO)
   reg [7:0] uio_in_reg;
   wire [7:0] uio_in;
   wire miso;
@@ -29,15 +27,17 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
+  // Initialize clock and force an explicit active-low reset pulse on startup
   initial begin
     clk = 0;
     rst_n = 0;
     ena = 1;
     ui_in = 0;
     uio_in_reg = 0;
+    #100;
+    rst_n = 1;
   end
 
-  // Instantiate top-level module
   tt_um_agila8 user_project (
 `ifdef USE_POWER_PINS
       .VPWR(VPWR),
@@ -53,7 +53,6 @@ module tb ();
       .rst_n   (rst_n)
   );
 
-  // QSPI Flash & PSRAM Interface Mapping
   wire flash_cs_n = uio_out[0];
   wire spi_mosi   = uio_out[1];
   wire spi_sck    = uio_out[3];
@@ -81,7 +80,7 @@ module tb ();
       end
   end
 
-  // PSRAM behavioral model (02h write / 03h read)
+  // PSRAM behavioral model
   reg [7:0] pmem [0:255];
   integer pi; initial for (pi = 0; pi < 256; pi = pi + 1) pmem[pi] = 8'h00;
   reg [5:0] p_cnt; reg [7:0] p_op; reg [23:0] p_addr; reg [7:0] p_wd; reg p_miso;
