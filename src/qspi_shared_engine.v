@@ -120,10 +120,6 @@ module qspi_shared_engine #(
         (div_sel == 2'd1) ? 20'd4   :
         (div_sel == 2'd2) ? 20'd16  :
                              20'd64;
-    // (values are +1 vs spi_ctrl.v's originals since this engine's
-    // low_target/high_target comparison convention takes half_period
-    // directly rather than as "extra cycles beyond 1", see phase_done
-    // below - same real timing, different constant encoding)
 
     //------------------------------------------------------------------
     // Shared engine state
@@ -155,43 +151,16 @@ module qspi_shared_engine #(
     assign cs_n_psram = !(cs_active_r && owner_r == OWNER_PSRAM);
     assign cs_n_spi   = !(cs_active_r && owner_r == OWNER_SPI);
 
-    // Flash/PSRAM consumers sample rdata in lockstep with the same-cycle
-    // ready pulse (see a8_core.v: `if (imem_ready) instr_hi<=imem_rdata`
-    // - both happen off the same registered edge), so a direct
-    // combinational read of sh is correct and needs no separate latch,
-    // exactly as in the original standalone modules.
     assign flash_rdata = sh[7:0];
     assign psram_rdata = sh[7:0];
 
     //------------------------------------------------------------------
-    // Per-front-end "just finished" guards (same valid/ready race fix
-    // as the original modules - see qspi_flash_reader.v's header - now
-    // tracked per-owner against the shared done pulse instead of each
-    // having a private state==S_DONE check).
+    // Per-front-end "just finished" guards
     //------------------------------------------------------------------
 
     reg just_finished_flash, just_finished_psram, just_finished_spi;
 
-    wire done = (state == S_XFER) && phase && phase_done && (bitcnt == bit_len_r - 6'd1);
-
-    // *** Bug fix (see chat): the guard must track state==S_DONE
-    // directly, not `done`. `done` is combinationally true one cycle
-    // BEFORE state actually becomes S_DONE (it fires during S_XFER's
-    // last bit, the same edge that schedules the S_DONE transition) -
-    // using it here cleared the guard one full cycle too early, exactly
-    // the same cycle `*_ready` first becomes visible to the requesting
-    // front-end. That let a still-stale `valid` (the core hasn't had a
-    // chance to drop it yet - same turnaround-latency reasoning as
-    // qspi_flash_reader.v's header) immediately trigger a NEW transfer
-    // using the OLD, not-yet-updated address - confirmed empirically:
-    // `accept` was already 1 on the exact same cycle `flash_ready` first
-    // pulsed. The original qspi_flash_reader.v got this right with
-    // `just_finished <= (state == S_DONE);` - this restores that exact
-    // timing, per-owner.
     wire in_done_state = (state == S_DONE);
-
-    // (done is also used below to select which owner is completing, so
-    // it stays defined above - just no longer drives the guards.)
 
     wire flash_want = flash_valid && !just_finished_flash;
     wire psram_want = psram_valid && !just_finished_psram;
@@ -201,9 +170,6 @@ module qspi_shared_engine #(
     wire engine_idle = (state == S_IDLE);
     wire accept      = engine_idle && (flash_want || psram_want || spi_want);
 
-    // Fixed priority: flash > psram > spi. Arbitrary - by construction
-    // (a8_core's single-active-transaction invariant, see header) at
-    // most one of these is ever actually asserted at once.
     wire [1:0]  grant_owner  = flash_want ? OWNER_FLASH :
                                 psram_want ? OWNER_PSRAM : OWNER_SPI;
     wire [39:0] grant_txword = flash_want ? {CMD_READ, 8'h00, flash_addr, 8'h00} :
@@ -217,10 +183,12 @@ module qspi_shared_engine #(
     wire [19:0] grant_hperiod = (flash_want || psram_want) ? HALF_PERIOD_CYCLES[19:0]
                                                               : spi_half_period;
 
+    // Moved forward to resolve Verilog elaboration declaration-after-use error
     wire [19:0] low_target   = half_period_r;
     wire [19:0] high_target  = half_period_r + {16'd0, read_delay_r};
     wire [19:0] phase_target = phase ? high_target : low_target;
     wire        phase_done   = (div_cnt >= phase_target - 20'd1) || (phase_target <= 20'd1);
+    wire        done         = (state == S_XFER) && phase && phase_done && (bitcnt == bit_len_r - 6'd1);
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -246,7 +214,7 @@ module qspi_shared_engine #(
             just_finished_psram <= 1'b0;
             just_finished_spi   <= 1'b0;
 
-            div_sel       <= 2'd3; // slowest, safest default (spi_ctrl.v parity)
+            div_sel       <= 2'd3;
             spi_last_rx   <= 8'h00;
         end else begin
             flash_ready <= 1'b0;
@@ -257,15 +225,11 @@ module qspi_shared_engine #(
             just_finished_psram <= in_done_state && (owner_r == OWNER_PSRAM);
             just_finished_spi   <= in_done_state && (owner_r == OWNER_SPI);
 
-            // spi_ctrl's CTRL register - plain, always-live, independent
-            // of the transfer FSM (same reasoning as spi_ctrl.v).
             if (spi_valid && spi_we && spi_addr == ADDR_CTRL)
                 div_sel <= spi_wdata[1:0];
             if (spi_valid && spi_addr == ADDR_CTRL)
                 spi_ready <= 1'b1;
 
-            // spi_ctrl's plain read of DATA (no we): return the last
-            // received byte immediately, no hardware transfer.
             if (spi_valid && spi_hit && spi_addr == ADDR_DATA && !spi_we
                 && !just_finished_spi)
                 spi_ready <= 1'b1;
@@ -278,10 +242,6 @@ module qspi_shared_engine #(
                     sck_r       <= 1'b0;
                     div_cnt     <= 20'd0;
                     if (accept) begin
-                        // Pre-shift by one bit - see header. tx_word is
-                        // left-justified by every front-end, so the
-                        // actual top bit (whatever it is) becomes the
-                        // first output bit, no hardcoded-0 assumption.
                         sh            <= grant_txword << 1;
                         mosi_r        <= grant_txword[39];
                         cs_active_r   <= 1'b1;
@@ -325,6 +285,7 @@ module qspi_shared_engine #(
                         OWNER_FLASH: flash_ready <= 1'b1;
                         OWNER_PSRAM: psram_ready <= 1'b1;
                         OWNER_SPI: begin
+                            spi_ready   <= 1 me_done ? 1'b1 : 1'b1;
                             spi_ready   <= 1'b1;
                             spi_last_rx <= sh[7:0];
                         end
