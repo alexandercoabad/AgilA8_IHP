@@ -2,7 +2,7 @@ SIM ?= icarus
 FST ?= -fst
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+PROJECT_SOURCES = *.v
 
 # RTL simulation target path
 SIM_BUILD = sim_build/rtl
