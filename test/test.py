@@ -121,9 +121,9 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
+    await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 10)
 
 
 def get_halted(dut):
@@ -196,7 +196,7 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 150
+GPIO_HOLD_CYCLES = 200
 
 
 async def set_gpio(dut, data, clock, start):
@@ -223,9 +223,11 @@ async def test_bootloader(dut):
     await start_clock(dut)
     await reset_dut(dut)
 
+    # Initial state: start bit asserted (ui_in[2] = 1)
+    await set_gpio(dut, 0, 0, 1)
     await ClockCycles(dut.clk, 100)
 
-    # Configures GPIO outputs first so HALT (uo_out[7]) and result (uo_out[3:0]) drive pins in GL mode
+    # Program payload: configure GPIO DIR, load r1=5, r2=3, r3=8, emit to GPIO DATA, halt
     prog_words = gpio_dir_setup_words() + [
         itype('ADDI', 1, 0, 5),
         itype('ADDI', 2, 0, 3),
@@ -236,10 +238,13 @@ async def test_bootloader(dut):
 
     prog = words_to_bytes(prog_words)
 
+    # Send length byte followed by instructions
     await send_byte_gpio(dut, len(prog))
     for b in prog:
         await send_byte_gpio(dut, b)
-    await set_gpio(dut, 0, 0, 0)
+
+    # Keep start bit asserted (ui_in[2] = 1) so execution transitions to RAM cleanly
+    await set_gpio(dut, 0, 0, 1)
 
     await wait_halted(dut)
 
@@ -250,148 +255,3 @@ async def test_bootloader(dut):
 
     uo_val = int(dut.uo_out.value)
     assert (uo_val & 0x0F) == 8, f"External output uo_out[3:0] should be 8, got {uo_val & 0x0F}"
-
-
-# ---------------------------------------------------------------------
-# Test 2: Flash Address Boundary Continuity (DISABLED)
-# ---------------------------------------------------------------------
-
-# @cocotb.test()
-async def test_boundary_continuity(dut):
-    """Executes code straddling the 0x0100 IMEM boundary."""
-    await start_clock(dut)
-
-    setup = gpio_dir_setup_words()
-    words = setup + [
-        itype('ADDI', 6, 0, 0),
-        itype('ADDI', 6, 6, 1)
-    ]
-
-    bytes_so_far = len(words) * 2
-    pad_bytes_needed = 0x80 - bytes_so_far
-    assert pad_bytes_needed >= 0 and pad_bytes_needed % 2 == 0
-    words += [itype('NOP', 0, 0, 0)] * (pad_bytes_needed // 2)
-
-    words += [
-        itype('ADDI', 5, 0, 17),
-        itype('HALT', 0, 0, 0)
-    ]
-
-    load_flash_image(dut, words)
-    await reset_dut(dut)
-
-    cycles = await wait_halted(dut)
-
-    MAX_CORRECT_CYCLES = 35_000
-    assert cycles < MAX_CORRECT_CYCLES, (
-        f"Execution took {cycles} cycles (limit {MAX_CORRECT_CYCLES}). "
-        f"Likely a phantom re-execution from a discontinuous flash_addr rebase bug."
-    )
-
-    if pc(dut) is not None:
-        assert reg(dut, 5) == 17, f"r5={reg(dut, 5)}, expected 17"
-        assert reg(dut, 6) == 1, f"r6={reg(dut, 6)}, expected 1"
-
-
-# ---------------------------------------------------------------------
-# Test 3: Flash / PSRAM Execution Regression (DISABLED)
-# ---------------------------------------------------------------------
-
-# @cocotb.test()
-async def test_flash_regression(dut):
-    """Executes ALU operations and PSRAM read/writes from Flash."""
-    await start_clock(dut)
-
-    prog = [
-        itype('ADDI', 1, 0, 15),
-        itype('ADDI', 2, 0, -16),
-        rtype('OR', 3, 1, 2),
-        itype('ADDI', 4, 0, 31),
-        itype('ADDI', 4, 4, 31),
-        itype('ADDI', 4, 4, 31),
-        itype('ADDI', 4, 4, 31),
-        itype('ADDI', 4, 4, 26),
-        itype('SW', 3, 4, 0),
-        itype('LW', 5, 4, 0),
-    ] + gpio_dir_setup_words() + gpio_data_out_r5_words() + [
-        itype('HALT', 0, 0, 0),
-    ]
-
-    load_flash_image(dut, prog)
-    await reset_dut(dut)
-
-    cycles = await wait_halted(dut)
-
-    if reg(dut, 1) is not None:
-        assert reg(dut, 1) == 15
-        assert reg(dut, 2) == 240
-        assert reg(dut, 3) == 255
-        assert reg(dut, 4) == 150, f"r4={reg(dut, 4)}, expected 150"
-        assert reg(dut, 5) == 255, f"r5={reg(dut, 5)}, expected 255"
-        assert int(dut.pmem[150].value) == 255, "PSRAM[150] was never written"
-
-    uo_val = int(dut.uo_out.value) & 0x7F
-    assert uo_val == 0x7F, f"External output uo_out[6:0]={uo_val}, expected 127"
-    assert cycles < 100_000, f"flash regression took too many cycles ({cycles})"
-
-
-# ---------------------------------------------------------------------
-# Test 4: Full All-Opcode Regression (DISABLED)
-# ---------------------------------------------------------------------
-
-RAW_REGRESSION_WORDS = [
-    0x2202, 0x2240, 0x2240, 0x2240, 0xe476, 0xd005, 0x2e00,
-    0x2205, 0x240a, 0x1650, 0x3888, 0x4a50, 0x5a50, 0x6a50, 0x7c42,
-    0x8d82, 0x223d, 0x3208, 0x240a, 0xa410, 0x9e10, 0x221f, 0x225f,
-    0x225f, 0x2247, 0x241b, 0xa440, 0x9640, 0x2205, 0xb242, 0xf000,
-    0x281f, 0x290b, 0x2900, 0x2900, 0x2a03, 0x2c01, 0x2400, 0x3b70,
-    0x2481, 0xb142, 0xb03d, 0x2203, 0xc205, 0x261f, 0x26df, 0x26df,
-    0x26d2, 0x261f, 0x26df, 0x26cf, 0x26c0, 0x281f, 0x291f, 0x291f,
-    0x2912, 0x281f, 0x291f, 0x291a, 0x2900, 0x2a1f, 0x2b5f, 0x2b44,
-    0x2b40, 0x2430, 0x2480, 0x2480, 0x2480, 0x2220, 0x2260, 0x226a,
-    0x2240, 0xa280, 0x9680, 0x9881, 0x243c, 0x2480, 0x2480, 0x2480,
-    0x221f, 0x225f, 0x2242, 0x2240, 0xa280, 0x9c80, 0x2201, 0x2240,
-    0x2240, 0x2240, 0xa2be, 0x9ebe
-]
-
-FULL_REGRESSION_WORDS = (
-    gpio_dir_setup_words() + 
-    RAW_REGRESSION_WORDS + 
-    gpio_data_out_r5_words_clean() + 
-    [itype('HALT', 0, 0, 0)]
-)
-
-
-# @cocotb.test()
-async def test_full_opcode_regression(dut):
-    """Executes every ISA opcode from external Flash."""
-    await start_clock(dut)
-
-    load_flash_image(dut, FULL_REGRESSION_WORDS)
-    dut.ui_in.value = 0
-    await reset_dut(dut)
-
-    try:
-        for _ in range(10_000):
-            await RisingEdge(dut.clk)
-            if dut.user_project.flash_mode_r.value == 1:
-                break
-    except (AttributeError, ValueError):
-        await ClockCycles(dut.clk, 25_000)
-
-    dut.ui_in.value = 0x55
-
-    cycles = await wait_halted(dut)
-
-    if reg(dut, 1) is not None:
-        assert reg(dut, 1) == 1, f"r1={reg(dut, 1)}, expected 1"
-        assert reg(dut, 2) == 252, f"r2={reg(dut, 2)}, expected 252"
-        assert reg(dut, 3) == 170, f"r3={reg(dut, 3)}, expected 170"
-        assert reg(dut, 4) == 85, f"r4={reg(dut, 4)}, expected 85"
-        assert reg(dut, 5) == 66, f"r5={reg(dut, 5)}, expected 66"
-        assert reg(dut, 6) == 64, f"r6={reg(dut, 6)}, expected 64"
-        assert reg(dut, 7) == 240, f"r7={reg(dut, 7)}, expected 240"
-
-    uo_val = int(dut.uo_out.value) & 0x7F
-    assert uo_val == 66, f"External output uo_out[6:0]={uo_val}, expected 66 (0x42)"
-    assert cycles < 300_000, f"full opcode test took too many cycles ({cycles})"
