@@ -1,45 +1,39 @@
-# Makefile
-# See https://docs.cocotb.org/en/stable/quickstart.html for more info
+# Makefile for Cocotb testing (RTL & Gate-Level Simulation)
 
-# defaults
 SIM ?= icarus
-FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
+
+# Paths
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = *.v
+TEST_DIR = $(PWD)
 
-ifneq ($(GATES),yes)
+# Standard cocotb setup
+TOPLEVEL = tb
+MODULE = test
 
-# RTL simulation:
-SIM_BUILD				= sim_build/rtl
-VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
+# Verilog Source Files for RTL
+VERILOG_SOURCES += $(TEST_DIR)/tb.v
+VERILOG_SOURCES += $(SRC_DIR)/tt_um_agila8.v
+VERILOG_SOURCES += $(SRC_DIR)/a8_core.v
+VERILOG_SOURCES += $(SRC_DIR)/a8_regfile.v
+VERILOG_SOURCES += $(SRC_DIR)/boot_rom.v
+VERILOG_SOURCES += $(SRC_DIR)/shared_ram.v
+VERILOG_SOURCES += $(SRC_DIR)/qspi_shared_engine.v
 
-else
+# Icarus Verilog Flags
+# -gno-specify disables specify blocks to avoid "ifnone with an edge-sensitive path" library errors
+COMPILE_ARGS += -g2012 -gno-specify -I$(SRC_DIR)
 
-# Gate level simulation:
-SIM_BUILD				= sim_build/gl
-COMPILE_ARGS    += -DGL_TEST
-COMPILE_ARGS    += -DFUNCTIONAL
-COMPILE_ARGS    += -DSIM
-COMPILE_ARGS    += -gno-specify
-VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
-VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
-
-# this gets copied in by the GDS action workflow
-VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
-
+# Gate-Level Simulation Configuration
+ifeq ($(GATES),yes)
+    COMPILE_ARGS += -DGL_TEST -DFUNCTIONAL -DSIM
+    
+    # Redefine source files to load the gate-level netlist and PDK Verilog models
+    VERILOG_SOURCES = $(TEST_DIR)/tb.v
+    VERILOG_SOURCES += $(TEST_DIR)/gate_level_netlist.v
+    VERILOG_SOURCES += /home/runner/pdk/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
+    VERILOG_SOURCES += /home/runner/pdk/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 endif
 
-# Allow sharing configuration between design and testbench via `include`:
-COMPILE_ARGS 		+= -I$(SRC_DIR)
-
-# Include the testbench sources:
-VERILOG_SOURCES += $(PWD)/tb.v
-TOPLEVEL = tb
-
-# List test module and specific testcase to run:
-MODULE ?= test
-TESTCASE ?= test_bootloader
-
-# include cocotb's make rules to take care of the simulator setup
+# Include cocotb makefiles
 include $(shell cocotb-config --makefiles)/Makefile.sim
