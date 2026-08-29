@@ -36,13 +36,10 @@ module tb ();
     uio_in_reg = 8'h00;
   end
 
-  // Force-clear internal registers in GL mode to eliminate 'X' states
   `ifdef GL_TEST
   initial begin
-    #0.1;
-    $display("Applying GL zero-initialization deposit...");
-    // Clear initial state on reset pin to force state resolution
     $deposit(user_project.rst_n, 1'b0);
+    $deposit(user_project.clk, 1'b0);
   end
   `endif
 
