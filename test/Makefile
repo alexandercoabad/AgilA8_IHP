@@ -1,6 +1,4 @@
 # Makefile
-# See https://docs.cocotb.org/en/stable/quickstart.html for more info
-
 SIM ?= icarus
 FST ?= -fst
 TOPLEVEL_LANG ?= verilog
@@ -10,19 +8,22 @@ PROJECT_SOURCES = *.v
 ifneq ($(GATES),yes)
 
 # RTL simulation:
-SIM_BUILD				= sim_build/rtl
+SIM_BUILD = sim_build/rtl
 VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
 
 else
 
 # Gate level simulation:
-SIM_BUILD				= sim_build/gl
-COMPILE_ARGS    += -DGL_TEST
-COMPILE_ARGS    += -DFUNCTIONAL
-COMPILE_ARGS    += -DSIM
-COMPILE_ARGS    += -DNO_SPECIFY
-COMPILE_ARGS    += -gno-specify
-COMPILE_ARGS    += -ginit-empty-queue
+SIM_BUILD = sim_build/gl
+COMPILE_ARGS += -DGL_TEST
+COMPILE_ARGS += -DFUNCTIONAL
+COMPILE_ARGS += -DSIM
+COMPILE_ARGS += -DNO_SPECIFY
+COMPILE_ARGS += -gno-specify
+COMPILE_ARGS += -gicarus-misc
+
+# Pass vvp-specific runtime flag via PLUSARGS, NOT COMPILE_ARGS
+PLUSARGS += +icarus:init-empty-queue
 
 STDCELL_ORIG = $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 STDCELL_PATCHED = $(SIM_BUILD)/sg13g2_stdcell_patched.v
@@ -40,7 +41,7 @@ VERILOG_SOURCES += $(PWD)/gate_level_netlist.v
 
 endif
 
-COMPILE_ARGS 		+= -I$(SRC_DIR)
+COMPILE_ARGS += -I$(SRC_DIR)
 VERILOG_SOURCES += $(PWD)/tb.v
 TOPLEVEL = tb
 
