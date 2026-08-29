@@ -27,14 +27,19 @@ module tb ();
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Initialize clock and force an explicit active-low reset pulse on startup
+  // Clock generation
+  always #5 clk = ~clk;
+
+  // Active initialization sequence for GL simulation
   initial begin
     clk = 0;
     rst_n = 0;
     ena = 1;
     ui_in = 0;
     uio_in_reg = 0;
-    #100;
+
+    // Flush flip-flops with active low reset while toggling clock
+    #200;
     rst_n = 1;
   end
 
