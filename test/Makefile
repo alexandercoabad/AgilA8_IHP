@@ -22,9 +22,7 @@ COMPILE_ARGS    += -DFUNCTIONAL
 COMPILE_ARGS    += -DSIM
 COMPILE_ARGS    += -DNO_SPECIFY
 COMPILE_ARGS    += -gno-specify
-COMPILE_ARGS    += -gicarus-misc
-
-PLUSARGS        += +icarus:init-empty-queue
+COMPILE_ARGS    += -ginit-empty-queue
 
 STDCELL_ORIG = $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
 STDCELL_PATCHED = $(SIM_BUILD)/sg13g2_stdcell_patched.v
