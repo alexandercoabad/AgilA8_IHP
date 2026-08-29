@@ -36,8 +36,6 @@ jobs:
 
       - name: GL test
         uses: TinyTapeout/tt-gds-action/gl_test@ttihp26b
-        # THE FIX: This environmental variable is explicitly read by the Tiny Tapeout 
-        # testing container to pass the required timing-strip argument straight to Icarus.
         env:
           IVVP_ARGS: "-gno-specify"
 
@@ -45,7 +43,7 @@ jobs:
     needs: gds
     runs-on: ubuntu-24.04
     permissions:
-      pages: write # to deploy to Pages
-      id-token: write # to verify the deployment originates from an appropriate source
+      pages: write
+      id-token: write
     steps:
       - uses: TinyTapeout/tt-gds-action/viewer@ttihp26b
