@@ -22,7 +22,6 @@ module tb ();
   wire [7:0] uio_in;
   wire miso;
 
-  // Safely default unconnected bidir inputs to 0
   assign uio_in = {uio_in_reg[7:3], miso, uio_in_reg[1:0]};
 
   wire [7:0] uo_out;
@@ -36,6 +35,16 @@ module tb ();
     ui_in = 8'h00;
     uio_in_reg = 8'h00;
   end
+
+  // Force-clear internal registers in GL mode to eliminate 'X' states
+  `ifdef GL_TEST
+  initial begin
+    #0.1;
+    $display("Applying GL zero-initialization deposit...");
+    // Clear initial state on the user project hierarchy
+    $deposit(user_project.rst_n, 1'b0);
+  end
+  `endif
 
   tt_um_agila8 user_project (
 `ifdef USE_POWER_PINS
@@ -52,7 +61,7 @@ module tb ();
       .rst_n   (rst_n)
   );
 
-  // Pull-up CS lines so high-Z defaults to de-asserted (1'b1)
+  // Drive default high state for inactive chip selects
   wire flash_cs_n = uio_oe[0] ? uio_out[0] : 1'b1;
   wire spi_mosi   = uio_oe[1] ? uio_out[1] : 1'b0;
   wire spi_sck    = uio_oe[3] ? uio_out[3] : 1'b0;
