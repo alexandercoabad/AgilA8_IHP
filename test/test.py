@@ -31,7 +31,9 @@ def words_to_bytes(words):
     return out
 
 
-CLOCK_PERIOD_PS = 15625  # 15.625 ns period = 64MHz clock speed
+# 15624 ps (~64MHz clock speed). Uses an even integer so period / 2 (7812 ps)
+# fits cleanly into 1ps simulator precision without floating-point errors.
+CLOCK_PERIOD_PS = 15624
 
 
 # Helper sequence to configure GPIO_DIR = 0xFF (address 0xF2) using r6 and r7
