@@ -101,7 +101,23 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in_reg.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 200)
+
+    await ClockCycles(dut.clk, 10)
+
+    # In Gate-Level simulation, traverse handles to clear X states
+    try:
+        target_core = getattr(getattr(dut, 'user_project', None), 'core', None) or getattr(dut, 'core', None)
+        if target_core is not None:
+            for handle in target_core:
+                try:
+                    if "dff" in handle._name.lower() or "reg" in handle._name.lower():
+                        handle.value = 0
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    await ClockCycles(dut.clk, 190)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 20)
 
