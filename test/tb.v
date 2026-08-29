@@ -9,6 +9,7 @@ module tb ();
     #1;
   end
 
+  // Standard Cell Power Nets
   wire VPWR = 1'b1;
   wire VGND = 1'b0;
 
@@ -21,26 +22,19 @@ module tb ();
   wire [7:0] uio_in;
   wire miso;
 
+  // Safely default unconnected bidir inputs to 0
   assign uio_in = {uio_in_reg[7:3], miso, uio_in_reg[1:0]};
 
   wire [7:0] uo_out;
   wire [7:0] uio_out;
   wire [7:0] uio_oe;
 
-  // Clock generation
-  always #5 clk = ~clk;
-
-  // Active initialization sequence for GL simulation
   initial begin
     clk = 0;
     rst_n = 0;
     ena = 1;
-    ui_in = 0;
-    uio_in_reg = 0;
-
-    // Flush flip-flops with active low reset while toggling clock
-    #200;
-    rst_n = 1;
+    ui_in = 8'h00;
+    uio_in_reg = 8'h00;
   end
 
   tt_um_agila8 user_project (
@@ -58,10 +52,11 @@ module tb ();
       .rst_n   (rst_n)
   );
 
-  wire flash_cs_n = uio_out[0];
-  wire spi_mosi   = uio_out[1];
-  wire spi_sck    = uio_out[3];
-  wire psram_cs_n = uio_out[6];
+  // Pull-up CS lines so high-Z defaults to de-asserted (1'b1)
+  wire flash_cs_n = uio_oe[0] ? uio_out[0] : 1'b1;
+  wire spi_mosi   = uio_oe[1] ? uio_out[1] : 1'b0;
+  wire spi_sck    = uio_oe[3] ? uio_out[3] : 1'b0;
+  wire psram_cs_n = uio_oe[6] ? uio_out[6] : 1'b1;
 
   // Flash behavioral model (03h read)
   reg [7:0] fmem [0:511];
@@ -85,7 +80,7 @@ module tb ();
       end
   end
 
-  // PSRAM behavioral model
+  // PSRAM behavioral model (02h write / 03h read)
   reg [7:0] pmem [0:255];
   integer pi; initial for (pi = 0; pi < 256; pi = pi + 1) pmem[pi] = 8'h00;
   reg [5:0] p_cnt; reg [7:0] p_op; reg [23:0] p_addr; reg [7:0] p_wd; reg p_miso;
