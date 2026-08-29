@@ -225,11 +225,12 @@ async def test_bootloader(dut):
 
     await ClockCycles(dut.clk, 100)
 
-    prog_words = [
+    # Configures GPIO outputs first so HALT (uo_out[7]) and result (uo_out[3:0]) drive pins in GL mode
+    prog_words = gpio_dir_setup_words() + [
         itype('ADDI', 1, 0, 5),
         itype('ADDI', 2, 0, 3),
         rtype('ADD', 3, 1, 2),    # r3 = 5 + 3 = 8
-    ] + gpio_dir_setup_words() + gpio_data_out_r3_words() + [
+    ] + gpio_data_out_r3_words() + [
         itype('HALT', 0, 0, 0),
     ]
 
