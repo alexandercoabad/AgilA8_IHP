@@ -15,13 +15,15 @@ MODULE = test
 VERILOG_SOURCES += $(TEST_DIR)/tb.v
 VERILOG_SOURCES += $(SRC_DIR)/tt_um_agila8.v
 VERILOG_SOURCES += $(SRC_DIR)/a8_core.v
+VERILOG_SOURCES += $(SRC_DIR)/a8_alu.v
+VERILOG_SOURCES += $(SRC_DIR)/a8_peripherals.v
 VERILOG_SOURCES += $(SRC_DIR)/a8_regfile.v
 VERILOG_SOURCES += $(SRC_DIR)/boot_rom.v
 VERILOG_SOURCES += $(SRC_DIR)/shared_ram.v
 VERILOG_SOURCES += $(SRC_DIR)/qspi_shared_engine.v
 
 # Icarus Verilog Flags
-# -gno-specify disables specify blocks to avoid "ifnone with an edge-sensitive path" library errors
+# -gno-specify disables specify blocks to avoid library timing construct errors in GL
 COMPILE_ARGS += -g2012 -gno-specify -I$(SRC_DIR)
 
 # Gate-Level Simulation Configuration
