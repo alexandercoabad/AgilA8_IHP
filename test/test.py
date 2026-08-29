@@ -31,12 +31,7 @@ def words_to_bytes(words):
     return out
 
 
-#CLOCK_PERIOD_NS = 1000.0 / 64.0  # 64MHz clock speed
-# Replace CLOCK_PERIOD_NS with CLOCK_PERIOD_PS:
 CLOCK_PERIOD_PS = 15625  # 15.625 ns period = 64MHz clock speed
-
-async def start_clock(dut):
-    cocotb.start_soon(Clock(dut.clk, CLOCK_PERIOD_PS, units="ps").start())
 
 
 # Helper sequence to configure GPIO_DIR = 0xFF (address 0xF2) using r6 and r7
@@ -116,7 +111,7 @@ def gpio_data_out_r5_words_clean():
 # ---------------------------------------------------------------------
 
 async def start_clock(dut):
-    cocotb.start_soon(Clock(dut.clk, CLOCK_PERIOD_NS, units="ns").start())
+    cocotb.start_soon(Clock(dut.clk, CLOCK_PERIOD_PS, units="ps").start())
 
 
 async def reset_dut(dut):
