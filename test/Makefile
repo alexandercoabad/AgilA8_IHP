@@ -22,7 +22,6 @@ COMPILE_ARGS += -DNO_SPECIFY
 COMPILE_ARGS += -gno-specify
 COMPILE_ARGS += -gicarus-misc
 
-# Pass vvp-specific runtime flag via PLUSARGS, NOT COMPILE_ARGS
 PLUSARGS += +icarus:init-empty-queue
 
 STDCELL_ORIG = $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_stdcell.v
