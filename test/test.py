@@ -153,13 +153,18 @@ def reg(dut, n):
     if n == 0:
         return 0
 
-    for path in [
-        getattr(getattr(getattr(getattr(dut, 'user_project', None), 'core', None), 'regfile', None), 'regs', [None]*8)[n],
-        getattr(getattr(dut, 'core', None), 'regfile', None), 'regs', [None]*8)[n]
-    ]:
-        val = get_signal_val(path)
-        if val is not None:
-            return val
+    core_up = getattr(getattr(dut, 'user_project', None), 'core', None)
+    core_top = getattr(dut, 'core', None)
+
+    for core in [core_up, core_top]:
+        if core is not None:
+            regfile = getattr(core, 'regfile', None)
+            if regfile is not None:
+                regs = getattr(regfile, 'regs', None)
+                if regs is not None:
+                    val = get_signal_val(regs[n])
+                    if val is not None:
+                        return val
 
     return None
 
