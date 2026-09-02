@@ -66,26 +66,27 @@ ifeq ($(GATES),yes)
         && sed -i '/specify/,/endspecify/d' $(STDCELL_PATCHED).tmp \
         && mv $(STDCELL_PATCHED).tmp $(STDCELL_PATCHED))
 
-    # *** BUG FIX (see chat): sg13g2_stdcell.v's sequential/mux cells
-    # (sg13g2_dfrbp_*, sg13g2_dllr*, sg13g2_mux2_*, ...) instantiate UDP
-    # primitives - ihp_dff_r, ihp_dff_sr_1, ihp_latch, ihp_latch_r,
-    # ihp_mux2, ihp_mux4, etc. - that are NOT defined in sg13g2_stdcell.v
-    # itself. In IHP's current PDK they live in a sibling file,
-    # sg13g2_stdcell/verilog/sg13g2_udp.v, which was never added to
-    # VERILOG_SOURCES here. Confirmed directly: compiling the patched
-    # stdcell file without it gives Icarus a hard elaboration failure
-    # ("Unknown module type: ihp_dff_r", etc. - 108 errors, one per
-    # missing-primitive instantiation) - not a silent X, a refusal to
-    # build at all. sg13g2_udp.v has no specify blocks or delayed_*
-    # wires of its own, so it needs no patching - just adding to the
-    # source list.
-    UDP_SRC := $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_stdcell/verilog/sg13g2_udp.v
+    # *** REVERTED BUG FIX (see chat): an earlier version of this
+    # Makefile added a UDP_SRC pointing at a supposed sibling file
+    # sg13g2_stdcell/verilog/sg13g2_udp.v, on the theory that the
+    # ihp_dff_r/ihp_latch/... UDP primitives sg13g2_stdcell.v's
+    # sequential/mux cells instantiate live there. That file does not
+    # exist in IHP-Open-PDK - confirmed against the actual PDK source:
+    # the primitives are defined inline in sg13g2_stdcell.v itself,
+    # each guarded by an `ifdef _udp_def_ihp_<name>_ ... endif` so
+    # repeated instantiations across the file don't redefine them
+    # (see e.g. `primitive ihp_latch (...)` / `primitive ihp_dff_r
+    # (...)` following the cell modules in that file). They use
+    # `table`/`endtable`, not `specify`/`endspecify`, so the sed step
+    # above that strips specify blocks for Icarus leaves them intact.
+    # Referencing the nonexistent sg13g2_udp.v made `make` fail before
+    # simulation even started ("No rule to make target ... sg13g2_udp.v").
+    # STDCELL_PATCHED alone already carries everything needed.
 
     # Redefine source files to load the gate-level netlist and PDK Verilog models
     VERILOG_SOURCES = $(TEST_DIR)/tb.v
     VERILOG_SOURCES += $(TEST_DIR)/gate_level_netlist.v
     VERILOG_SOURCES += $(PDK_ROOT)/ihp-sg13g2/libs.ref/sg13g2_io/verilog/sg13g2_io.v
-    VERILOG_SOURCES += $(UDP_SRC)
     VERILOG_SOURCES += $(STDCELL_PATCHED)
 endif
 
