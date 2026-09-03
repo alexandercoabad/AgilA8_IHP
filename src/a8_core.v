@@ -168,9 +168,32 @@ module a8_core (
             imem_valid <= 1'b0;
             dmem_valid <= 1'b0;
             dmem_we    <= 1'b0;
-            dmem_addr  <= 8'h00;
-            dmem_wdata <= 8'h00;
             rf_rd_we   <= 1'b0;
+            // *** BUG FIX (see chat): imem_addr/dmem_addr were never
+            // reset, relying on their consuming logic to mask X via
+            // rst_n/valid=0 dominance. That holds for dmem_addr (every
+            // consumer gates it with dmem_valid&&..., and 0&&X=0 has a
+            // true zero-dominance shortcut - both behaviorally and as
+            // a real synthesized AND gate). It does NOT hold for
+            // imem_addr: boot_rom_hit/shared_ram_imem_hit in
+            // tt_um_agila8.v compare it with magnitude operators
+            // (imem_addr < 16'h0080, >=, <) with no such shortcut - X
+            // on the compared value gives an X result outright. In
+            // behavioral RTL sim this got masked anyway, because
+            // `if (imem_ready)` on an X condition silently takes the
+            // else branch (IEEE-mandated: only an exact 1 takes the
+            // if-branch) - but the synthesized mux driving state's/
+            // imem_valid's next value has no such grace: an X select
+            // gives an X output for real. Confirmed directly against
+            // the actual gate-level netlist: `state` visibly
+            // disintegrates into X within 2 clock edges of reset
+            // release, immediately poisoning the whole design (uo_out
+            // is entirely X before the bootloader even starts, not a
+            // timeout from running too long). dmem_addr is reset here
+            // too, defensively, so nothing built on top of it can
+            // develop the same class of bug later.
+            imem_addr  <= 16'h0000;
+            dmem_addr  <= 8'h00;
         end else begin
             rf_rd_we   <= 1'b0; // default: no writeback this cycle
             dmem_valid <= 1'b0; // pulse, not level
