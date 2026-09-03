@@ -168,6 +168,8 @@ module a8_core (
             imem_valid <= 1'b0;
             dmem_valid <= 1'b0;
             dmem_we    <= 1'b0;
+            dmem_addr  <= 8'h00;
+            dmem_wdata <= 8'h00;
             rf_rd_we   <= 1'b0;
         end else begin
             rf_rd_we   <= 1'b0; // default: no writeback this cycle
@@ -321,4 +323,3 @@ module a8_core (
     end
 
 endmodule
-
