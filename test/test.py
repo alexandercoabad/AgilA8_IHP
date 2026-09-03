@@ -6,7 +6,7 @@
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles, RisingEdge
+from cocotb.triggers import ClockCycles, RisingEdge, Timer
 
 # ---------------------------------------------------------------------
 # Assembler / Instruction Encoding Helpers
@@ -48,9 +48,21 @@ async def reset_dut(dut):
     dut.ui_in.value = 0
     dut.uio_in.value = 0
     dut.rst_n.value = 0
-    await ClockCycles(dut.clk, 5)
+    # HARDENING (restored from a previous working version): give reset
+    # generous margin on both edges rather than the bare minimum. Costs
+    # nothing (400_000-cycle budgets dwarf 40 extra cycles) and removes
+    # any risk of releasing rst_n before every flop in the design has
+    # actually seen it asserted for a full clock.
+    await ClockCycles(dut.clk, 20)
     dut.rst_n.value = 1
-    await ClockCycles(dut.clk, 1)
+    await ClockCycles(dut.clk, 20)
+    # HARDENING: let non-blocking assignments triggered by this edge
+    # fully settle before any test starts driving/sampling pins. Whether
+    # a same-timestep NBA update is visible to a Python callback fired on
+    # the triggering edge is a simulator-scheduling detail that can (and
+    # does) differ between Icarus versions - this removes that ambiguity
+    # rather than relying on it going the right way.
+    await Timer(1, units="ns")
 
 
 def get_halted(dut):
@@ -84,6 +96,13 @@ async def wait_halted(dut, max_cycles=400_000):
     """Waits until execution halts safely across RTL and GL environments."""
     for _ in range(max_cycles):
         await RisingEdge(dut.clk)
+        # HARDENING (restored from a previous working version): sample
+        # halted/uo_out only after letting this edge's non-blocking
+        # assignments settle, same rationale as reset_dut above. Without
+        # this, get_halted() risks reading a signal mid-update on
+        # whichever simulator/version doesn't happen to order its event
+        # queue the way this test was written against.
+        await Timer(1, units="ns")
         if get_halted(dut):
             return
     raise TimeoutError(f"design never halted within {max_cycles} cycles")
@@ -111,7 +130,14 @@ def pc(dut):
 # Test 1: Bootloader over GPIO
 # ---------------------------------------------------------------------
 
-GPIO_HOLD_CYCLES = 150
+# HARDENING: restored from a previous working version. 150 passed
+# reliably in local testing, but this margin exists specifically to
+# give boot_rom's bit-sampling loop (BIT_WAIT_HIGH/BIT_WAIT_LOW in
+# build_boot_rom.py) comfortable room regardless of exact per-instruction
+# cycle counts on a given simulator/build - 400_000 cycles of budget
+# easily absorbs the extra hold time, so there's no reason to run this
+# close to the minimum that happens to work today.
+GPIO_HOLD_CYCLES = 500
 
 
 async def set_gpio(dut, data, clock, start):
@@ -137,6 +163,18 @@ async def test_bootloader(dut):
     """Bit-bang program over GPIO into shared_ram and execute."""
     await start_clock(dut)
     await reset_dut(dut)
+
+    # HARDENING (restored from a previous working version): assert
+    # START and hold it for a stretch before the timing-critical
+    # byte-by-byte transmission begins, rather than going straight into
+    # send_byte_gpio(). boot_rom's WAIT_START loop (build_boot_rom.py)
+    # only polls for a bounded number of iterations before giving up and
+    # falling back to flash boot - this pre-roll makes sure START is
+    # unambiguously seen well within that window regardless of exactly
+    # how many cycles the first few instructions after reset take on a
+    # given simulator/build.
+    await set_gpio(dut, 0, 0, 1)
+    await ClockCycles(dut.clk, 100)
 
     # ADDI r1,r0,5 ; ADDI r2,r0,3 ; ADD r3,r1,r2 ; HALT
     prog = words_to_bytes([
