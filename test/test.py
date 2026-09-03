@@ -21,7 +21,7 @@ def itype(op, rd, rs1, imm6):
 
 
 def rtype(op, rd, rs1, rs2):
-    return (OP[op] << 12) | (rd << 9) | (rs2 << 3)  # Fixed rs2 bit-shift
+    return (OP[op] << 12) | (rd << 9) | (rs1 << 6) | (rs2 << 3)
 
 
 def words_to_bytes(words):
