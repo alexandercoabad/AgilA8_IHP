@@ -62,6 +62,7 @@ module a8_core (
     // ------------------------------------------------------------------
     localparam OP_NOP  = 4'h0;
     localparam OP_ADD  = 4'h1;
+    /* verilator lint_off UNUSEDPARAM */
     localparam OP_ADDI = 4'h2;
     localparam OP_SUB  = 4'h3;
     localparam OP_AND  = 4'h4;
@@ -69,6 +70,7 @@ module a8_core (
     localparam OP_XOR  = 4'h6;
     localparam OP_SLL  = 4'h7;
     localparam OP_SRL  = 4'h8;
+    /* verilator lint_on UNUSEDPARAM */
     localparam OP_LW   = 4'h9;
     localparam OP_SW   = 4'hA;
     localparam OP_BEQ  = 4'hB;
@@ -169,29 +171,28 @@ module a8_core (
             dmem_valid <= 1'b0;
             dmem_we    <= 1'b0;
             rf_rd_we   <= 1'b0;
-            // *** BUG FIX (see chat): imem_addr/dmem_addr were never
-            // reset, relying on their consuming logic to mask X via
-            // rst_n/valid=0 dominance. That holds for dmem_addr (every
-            // consumer gates it with dmem_valid&&..., and 0&&X=0 has a
-            // true zero-dominance shortcut - both behaviorally and as
-            // a real synthesized AND gate). It does NOT hold for
-            // imem_addr: boot_rom_hit/shared_ram_imem_hit in
-            // tt_um_agila8.v compare it with magnitude operators
-            // (imem_addr < 16'h0080, >=, <) with no such shortcut - X
-            // on the compared value gives an X result outright. In
-            // behavioral RTL sim this got masked anyway, because
-            // `if (imem_ready)` on an X condition silently takes the
-            // else branch (IEEE-mandated: only an exact 1 takes the
-            // if-branch) - but the synthesized mux driving state's/
-            // imem_valid's next value has no such grace: an X select
-            // gives an X output for real. Confirmed directly against
-            // the actual gate-level netlist: `state` visibly
-            // disintegrates into X within 2 clock edges of reset
-            // release, immediately poisoning the whole design (uo_out
-            // is entirely X before the bootloader even starts, not a
-            // timeout from running too long). dmem_addr is reset here
-            // too, defensively, so nothing built on top of it can
-            // develop the same class of bug later.
+            // *** BUG FIX (ported from the IHP variant of this project -
+            // see chat): imem_addr/dmem_addr were never reset, relying on
+            // their consuming logic to mask X via rst_n/valid=0 dominance.
+            // That holds for dmem_addr (every consumer gates it with
+            // dmem_valid&&..., and 0&&X=0 has a true zero-dominance
+            // shortcut - both behaviorally and as a real synthesized AND
+            // gate). It does NOT hold for imem_addr: boot_rom_hit/
+            // shared_ram_imem_hit in tt_um_agila8.v compare it with
+            // magnitude operators (imem_addr < 16'h0080, >=, <) with no
+            // such shortcut - X on the compared value gives an X result
+            // outright. Behavioral RTL sim hides this (`if (imem_ready)`
+            // on an X condition silently takes the else branch per IEEE
+            // semantics - only an exact 1 takes the if-branch), but a
+            // synthesized mux driving state's/imem_valid's next value has
+            // no such grace: an X select gives a real X output. Confirmed
+            // directly against the IHP build's gate-level netlist - state
+            // disintegrated into X within 2 clock edges of reset release,
+            // before the bootloader even started. Not yet independently
+            // confirmed to manifest on THIS (sky130) netlist - applying it
+            // here defensively, since the underlying RTL gap is identical
+            // and whether it bites depends on synthesis/tool-version
+            // specifics that aren't guaranteed to stay favorable.
             imem_addr  <= 16'h0000;
             dmem_addr  <= 8'h00;
         end else begin
@@ -282,7 +283,9 @@ module a8_core (
 
                         OP_JAL: begin
                             rf_rd_addr <= 3'd7; // link register is always r7
-                            rf_rd_data <= pc + 16'd2;
+                            /* verilator lint_off WIDTHTRUNC */
+                            rf_rd_data <= pc + 16'd2;  // regfile is 8-bit: intentionally keeps only the low byte of the return address
+                            /* verilator lint_on WIDTHTRUNC */
                             rf_rd_we   <= 1'b1;
                             next_pc    <= pc + {{9{imm6[5]}}, imm6, 1'b0};  // FIX: 9 copies (was 8) to fill 16 bits
                             state      <= S_WRITEBACK;
@@ -290,7 +293,9 @@ module a8_core (
 
                         OP_JALR: begin
                             rf_rd_addr <= rd_f;
-                            rf_rd_data <= pc + 16'd2;
+                            /* verilator lint_off WIDTHTRUNC */
+                            rf_rd_data <= pc + 16'd2;  // regfile is 8-bit: intentionally keeps only the low byte of the return address
+                            /* verilator lint_on WIDTHTRUNC */
                             rf_rd_we   <= 1'b1;
                             next_pc    <= {8'h00, rs1_data + imm_sext}; // FIX: force 8-bit add, then zero-extend
                             state      <= S_WRITEBACK;

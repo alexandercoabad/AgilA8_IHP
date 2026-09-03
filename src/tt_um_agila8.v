@@ -133,7 +133,9 @@ module tt_um_agila8 (
     // Kept for debug-probe compatibility (tb_debug6.v reads this
     // hierarchically) - not otherwise used now that boot_rom_hit /
     // shared_ram_imem_hit are precise enough on their own.
+    /* verilator lint_off UNUSEDSIGNAL */
     wire onchip_imem_hit     = boot_rom_hit || shared_ram_imem_hit;
+    /* verilator lint_on UNUSEDSIGNAL */
 
     wire [7:0]  boot_rom_rdata;
     wire        boot_rom_ready;
@@ -376,6 +378,8 @@ module tt_um_agila8 (
     //wire _unused_periph =
       //  &{1'b0, periph_hit, gpio_dir_w, spi_hit_engine};
     wire _unused_periph = &{1'b0, periph_hit, gpio_dir_w[6:0], spi_hit_engine};
+    wire _unused_uio_in  = &{uio_in[7:3], uio_in[1:0]};
+    wire _unused_gpio_out_msb = gpio_out_w[7];
 
 endmodule
 

@@ -67,6 +67,7 @@ module shared_ram (
     wire       access_valid = dmem_valid || imem_valid;
     wire       access_we    = dmem_valid && dmem_we;  // imem never writes
     wire [6:0] access_addr  = imem_valid ? imem_addr : dmem_addr[6:0];
+    wire _unused_dmem_addr_msb = dmem_addr[7];  // only 0x00-0x7F is ever meaningful, see header comment
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
