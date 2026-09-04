@@ -7,12 +7,10 @@ Tapeout of this project is sponsored by the IEEE Industrial Electronics & Photon
 
 ## Layout 
 
+<img width="988" height="490" alt="Screenshot 2026-09-04 at 9 30 18 AM" src="https://github.com/user-attachments/assets/0ca31aee-e7bd-40ea-98d5-a89d4089ee10" />
+
+
 https://gds-viewer.tinytapeout.com/?model=https://alexandercoabad.github.io/AgilA8_IHP/tinytapeout.oas&pdk=ihp-sg13g2
-
-
-
-
-3D Viewer: [https://gds-viewer.tinytapeout.com/?model=https://alexandercoabad.github.io/AgilA8_IHP/tinytapeout.oas&pdk=sky130A](https://gds-viewer.tinytapeout.com/?model=https://alexandercoabad.github.io/AgilA8_IHP/tinytapeout.oas&pdk=ihp-sg13g2)
 
 
 ## Block Diagram
