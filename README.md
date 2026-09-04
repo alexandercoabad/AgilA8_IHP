@@ -8,7 +8,7 @@ Tapeout of this project is sponsored by the IEEE Industrial Electronics & Photon
 ## Layout 
 
 
-<img width="468" height="67" alt="image" src="https://github.com/user-attachments/assets/430d1221-eef9-4cb4-b6dd-48678918e423" />
+
 
 
 
