@@ -7,8 +7,7 @@ Tapeout of this project is sponsored by the IEEE Industrial Electronics & Photon
 
 ## Layout 
 
-
-<img width="988" height="490" alt="Screenshot 2026-09-04 at 9 30 18 AM" src="https://github.com/user-attachments/assets/2493c905-08b4-46c0-baf7-456c0dd8e38a" />
+https://gds-viewer.tinytapeout.com/?model=https://alexandercoabad.github.io/AgilA8_IHP/tinytapeout.oas&pdk=ihp-sg13g2
 
 
 
