@@ -35,22 +35,44 @@ purpose-built blocks:
   general-purpose "arbitrary program plus separate scratch RAM" role.
 
 This on-chip storage is the reason the project targets `info.yaml`'s
-current **4x2** tile budget rather than the 1x2 the design started at.
-That number came from an actual GDS run, not an area estimate - the
-same design first tried 6x2 tiles (comfortable, but wasteful once
+current **3x2** tile budget rather than the 1x2 the design started at.
+That number came from actual GDS runs, not an area estimate - the same
+design first tried 6x2 tiles (comfortable, but wasteful once
 `shared_ram`'s merge cut on-chip flip-flop count by roughly 40%), then
 4x2 at the default `PL_TARGET_DENSITY_PCT: 45`, which took multiple
-hours of global placement without converging. Raising it to `50` (in
-`src/config.json`) let the same 4x2 floorplan pass in about 30 minutes.
-Cell count alone doesn't predict this: flattened synthesis puts this
-design at roughly 61% of the pre-merge design's cell count, comparable
-raw cells-per-die-area, but a much higher *mux* share of the design
-(largely the shared-engine and shared-RAM arbitration logic) than a
-flip-flop-dominated netlist has - and that logic mix, not just cell
-count, is what made the old density target too tight for this specific
-floorplan. If you change `shared_ram.v`/`qspi_shared_engine.v`
-substantially or resize the tile budget again, expect to revisit this
-value rather than assume the default is still appropriate.
+hours of global placement *without converging* - OpenROAD's GPL kept
+running because overflow never dropped below threshold, not because
+placement itself is inherently slow. Raising it to `50` (in
+`src/config.json`) let that 4x2 floorplan pass in about 30 minutes, at
+roughly 50% utilization.
+That headroom made 3x2 worth trying, and it needed `PL_TARGET_DENSITY_PCT: 70`
+to place at all - but this time the run's own log tells a very
+different story than the 4x2 attempts: global placement genuinely
+*converged*, finishing at iteration 449 with overflow down to 0.0995,
+in 2.52 seconds (`28-openroad-globalplacement/runtime.txt`, from the
+`gds.yaml` CI run pushed as `bf17067`). The same log reports
+`Minimum Feasible Density: 0.6800` for this floorplan - meaning 70 is
+only 2 points above the actual placement floor, not an arbitrary
+round number. Final routed utilization came out to 67.717%, matching
+that ceiling closely. So unlike the 4x2/45 failure, this isn't a case
+of placement struggling; it's a case of otherwise-clean placement
+having very little room left to give if the design grows further.
+For reference, in this same run the actual time sinks in the full GDS
+flow are detailed routing (~11m38s) and Magic DRC (~4m51s) - global
+placement is a rounding error against those by comparison.
+Cell count alone doesn't predict any of this: flattened synthesis puts
+this design at roughly 61% of the pre-merge design's cell count,
+comparable raw cells-per-die-area, but a much higher *mux* share of
+the design (largely the shared-engine and shared-RAM arbitration
+logic) than a flip-flop-dominated netlist has - and that logic mix,
+not just cell count, is what made the default density target too
+tight for the 4x2 floorplan and what leaves 3x2 with only ~2 points of
+density headroom at 70. If you change
+`shared_ram.v`/`qspi_shared_engine.v` substantially or resize the tile
+budget again, expect to revisit this value rather than assume 70 is
+still appropriate - and check the global placement log's own
+`Minimum Feasible Density` line first, since it directly tells you the
+floor before you waste a run finding it by trial and error.
 
 ### Everything else: external QSPI flash/PSRAM
 
@@ -254,29 +276,82 @@ correctly ignores it.
 
 ## How to test
 
-All tests run against real RTL in Icarus Verilog, not just a Python
-model - `test/sim_full_top.py` and `test/test_boundary_continuity.py`
-exist as *independent* cross-checks of the address-routing logic
-alongside the Verilog testbenches, not replacements for them.
+### The CI suite (`test/test.py`)
 
-1. **`test/tb_bootloader.v`** - the primary end-to-end test. Bit-bangs
-   a small program in over `ui_in[0:2]` (see "Loading a program"
-   above), then checks it landed correctly in `shared_ram` and executed
-   correctly. Self-checking (`RESULT: PASS`/`FAIL`).
+This is what actually runs on every push - it's what `make` (RTL mode)
+and `GATES=yes make` (the `gl_test` CI job, against the real
+synthesized netlist) both execute via `test/tb.v`. It's four cocotb
+tests, and each one is written to make the *same* assertions
+meaningful in both simulation modes: anything that reads internal
+hierarchy (`dut.user_project.core...`, register file contents, `pc()`)
+is wrapped in `if ... is not None:` and simply skipped in GL mode,
+where that hierarchy doesn't exist in the synthesized netlist - only
+externally-observable behavior (`uo_out`, whether the design halts at
+all) is checked unconditionally in both modes.
+
+1. **`test_bootloader`** - the primary end-to-end path: bit-bangs a
+   program in over `ui_in[0:2]` (see "Loading a program" above) rather
+   than pre-loading memory directly, so it's also exercising the
+   bit-bang protocol itself, not just what runs afterward. The payload
+   first sets `GPIO_DIR = 0xFF` at `0xF2` (needed so HALT status can
+   reach `uo_out[7]` even in GL mode, where there's no internal
+   `halted` signal to peek at directly), then runs `ADDI r1,r0,5`;
+   `ADDI r2,r0,3`; `ADD r3,r1,r2`, writes `r3` out to `GPIO_DATA`
+   (`0xF0`), and halts. RTL-only checks confirm `r1==5`, `r2==3`,
+   `r3==8`; the check that also holds in GL mode confirms `uo_out` is
+   fully resolvable (no `X`/`Z` - see the `imem_addr` reset bug this
+   test is what originally caught) and its low nibble reads back `8`,
+   the value that was written to `GPIO_DATA`.
+2. **`test_boundary_continuity`** - regression test for a
+   flash-address continuity bug in `tt_um_agila8.v` (a discontinuous
+   rebase exactly at IMEM `0x0100` that silently re-executed a flash
+   program's first 128 bytes for anything longer). Loads directly into
+   the behavioral flash model (`fmem`, via `load_flash_image()`)
+   instead of bit-banging, since the point here is exercising flash
+   fetch across that specific address boundary, not the GPIO
+   bootloader path test 1 already covers. The program sets `r6=1`,
+   pads with 62 `NOP`s to straddle `0x0100`, then sets `r5=17` and
+   halts. RTL-only checks confirm both `r5==17` and `r6==1` - `r6`
+   matters because a reset-then-increment register nets to the same
+   value whether a duplicate lap silently ran or not, so `r5` alone
+   wouldn't reliably catch this bug even though it looks sufficient.
+3. **`test_flash_regression`** - general-purpose flash + PSRAM
+   regression. Runs `ADDI`, `OR`, and address arithmetic to compute
+   `r3 = 15 OR 240 (as 8-bit) = 255`, writes it to external PSRAM at
+   address 150, reads it back into `r5`, and halts. RTL-only checks
+   confirm every intermediate register (`r1..r5`) alongside the
+   round-tripped PSRAM value, so a failure here localizes to either
+   the ALU op or the PSRAM write/read path rather than just "something
+   is wrong."
+4. **`test_full_opcode_regression`** - the broadest test: a
+   pre-assembled 93-word machine-code image (every opcode in the ISA
+   at least once) loaded directly into flash. Unlike the other three,
+   this one never bit-bangs a boot payload in at all - it waits out
+   `boot_rom`'s own timeout so the design falls through into
+   `FLASH_MODE` on its own, then drives `ui_in = 0x55` to exercise
+   general-purpose input handling too. RTL-only checks confirm all
+   seven general-purpose registers (`r1..r7`) against known-good final
+   values, which only line up if every opcode class executed
+   correctly.
+
+### Standalone debug testbenches (manual, not run in CI)
+
+These predate the cocotb suite above and exist as independent,
+lower-level cross-checks and debugging aids, not replacements for it -
+`test/sim_full_top.py` and `test/test_boundary_continuity.py` (the
+Python one, distinct from the cocotb test of the same name above)
+exist as *independent* cross-checks of the address-routing logic
+outside cocotb entirely.
+
+1. **`test/tb_bootloader.v`** - a standalone version of the GPIO
+   bootloader path, self-checking (`RESULT: PASS`/`FAIL`) without
+   cocotb.
 2. **`test/tb_boundary.v`** (run `test/build_boundary_test.py` first to
-   generate its `imem.hex`) - regression test for the flash-address
-   continuity bug fixed in `tt_um_agila8.v` (a discontinuous rebase
-   exactly at IMEM 0x0100 that silently re-executed a flash program's
-   first 128 bytes for anything longer). Checks the final PC lands
-   exactly where continuous addressing predicts, not just register
-   values - see the test's own header for why register values alone
-   can't reliably catch this specific bug (a reset-then-increment
-   register pattern nets to the same value whether the redundant lap
-   ran or not).
+   generate its `imem.hex`) - the original, standalone version of the
+   boundary-continuity regression, checking the final PC lands exactly
+   where continuous addressing predicts.
 3. **`test/tb_regression.v`** (run `test/build_flash_test.py` first) -
-   general-purpose flash-execution regression: ALU ops, PSRAM
-   read/write, and the boot_rom timeout -> FLASH_MODE handoff, checked
-   against known-good register/memory values.
+   the original standalone flash/PSRAM regression.
 4. **`test/tb_debug6.v`** - a raw cycle-by-cycle trace tool (PC, key
    registers, `shared_ram` contents) for debugging changes to this
    logic; no pass/fail of its own.
